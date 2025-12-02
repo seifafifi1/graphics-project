@@ -1,0 +1,6 @@
+# Pink Pig Material
+newmtl PinkPig
+Ka 0.2 0.1 0.1
+Kd 1.0 0.6 0.7
+Ks 0.3 0.2 0.2
+Ns 30.0
