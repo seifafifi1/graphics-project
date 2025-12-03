@@ -1,0 +1,4 @@
+# Stones material
+newmtl stones
+Kd 0.5 0.5 0.5
+Ka 0.3 0.3 0.3

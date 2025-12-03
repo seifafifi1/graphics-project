@@ -695,11 +695,14 @@ public:
 #define OBJ_TRIMESH   0x4100
 #define TRI_VERTEXL   0x4110
 #define TRI_FACEL     0x4120
+#define TRI_MAPCOORD  0x4140
 
 class Model3DS {
 public:
     std::vector<Vector3> vertices;
+    std::vector<std::pair<float, float>> texCoords;  // UV coordinates
     std::vector<std::vector<int>> faces;
+    float minY, maxY, minZ, maxZ;  // For positioning on ground
     
     Vector3 position;
     Vector3 rotation;
@@ -710,7 +713,7 @@ public:
     bool isLoaded;
     std::string name;
     
-    Model3DS() : hasDisplayList(false), isLoaded(false), displayList(0) {
+    Model3DS() : hasDisplayList(false), isLoaded(false), displayList(0), minY(0), maxY(0), minZ(0), maxZ(0) {
         position = Vector3(0, 0, 0);
         rotation = Vector3(0, 0, 0);
         scale = Vector3(1, 1, 1);
@@ -793,6 +796,27 @@ public:
                         float y = readFloat(file);
                         float z = readFloat(file);
                         vertices.push_back(Vector3(x, y, z));
+                        // Track min/max Y and Z for ground positioning
+                        if (vertices.size() == 1) {
+                            minY = maxY = y;
+                            minZ = maxZ = z;
+                        } else {
+                            if (y < minY) minY = y;
+                            if (y > maxY) maxY = y;
+                            if (z < minZ) minZ = z;
+                            if (z > maxZ) maxZ = z;
+                        }
+                    }
+                }
+                break;
+            
+            case TRI_MAPCOORD:
+                {
+                    unsigned short numCoords = readShort(file);
+                    for (int i = 0; i < numCoords; i++) {
+                        float u = readFloat(file);
+                        float v = readFloat(file);
+                        texCoords.push_back(std::make_pair(u, v));
                     }
                 }
                 break;
@@ -858,6 +882,8 @@ public:
     void buildDisplayList() {
         if (!isLoaded || vertices.empty() || faces.empty()) return;
         
+        bool hasTexCoords = !texCoords.empty() && texCoords.size() >= vertices.size();
+        
         displayList = glGenLists(1);
         glNewList(displayList, GL_COMPILE);
         
@@ -875,8 +901,20 @@ public:
                 Vector3 normal = edge1.cross(edge2).normalized();
                 
                 glNormal3f(normal.x, normal.y, normal.z);
+                
+                if (hasTexCoords) {
+                    glTexCoord2f(texCoords[face[0]].first, texCoords[face[0]].second);
+                }
                 glVertex3f(v0.x, v0.y, v0.z);
+                
+                if (hasTexCoords) {
+                    glTexCoord2f(texCoords[face[1]].first, texCoords[face[1]].second);
+                }
                 glVertex3f(v1.x, v1.y, v1.z);
+                
+                if (hasTexCoords) {
+                    glTexCoord2f(texCoords[face[2]].first, texCoords[face[2]].second);
+                }
                 glVertex3f(v2.x, v2.y, v2.z);
                 
                 glEnd();
@@ -885,6 +923,8 @@ public:
         
         glEndList();
         hasDisplayList = true;
+        
+        std::cout << "Model has " << texCoords.size() << " texture coordinates" << std::endl;
     }
     
     void render() const {
@@ -1058,7 +1098,7 @@ int windowHeight = 720;
 int lastMouseX = windowWidth / 2;
 int lastMouseY = windowHeight / 2;
 bool mouseInitialized = false;
-float mouseSensitivity = 0.1f;
+float mouseSensitivity = 0.2f;
 
 // Key states for continuous movement
 bool keyW = false;
@@ -1068,6 +1108,10 @@ bool keyD = false;
 
 // Current scene (1 or 2)
 int currentScene = 1;
+
+// Forward declaration for scene collision checking
+typedef bool (*CollisionCheckFunc)(float x, float z, float radius);
+CollisionCheckFunc sceneCollisionCheck = nullptr;
 
 // ============================================================================
 // PLAYER CLASS
@@ -1105,29 +1149,12 @@ public:
         }
     }
     
-    // This will be overridden by checking scene objects
+    // Check collision using scene's collision detection
     bool hasCollision(float targetX, float targetZ) {
-        // Pig collision (dynamic position)
-        // Note: We'll need to access the pig position from Scene1
-        // For now, disable pig collision since it moves
-        // if (checkCollision(targetX, targetZ, pigPosition.x, pigPosition.z, 0.8f)) {
-        //     return true;
-        // }
-        
-        // Procedural trees collision
-        float treePositions[][2] = {
-            {-8.0f, -8.0f}, {0.0f, -12.0f}, {8.0f, -8.0f},
-            {12.0f, 0.0f}, {8.0f, 8.0f},
-            {0.0f, 12.0f}, {-8.0f, 8.0f}, {-12.0f, 0.0f},
-            {-15.0f, -15.0f}, {15.0f, -15.0f}, {15.0f, 15.0f}, {-15.0f, 15.0f}
-        };
-        
-        for (int i = 0; i < 12; i++) {
-            if (checkCollision(targetX, targetZ, treePositions[i][0], treePositions[i][1], 0.5f)) {
-                return true;
-            }
+        // Use scene collision check if available
+        if (sceneCollisionCheck != nullptr) {
+            return sceneCollisionCheck(targetX, targetZ, radius);
         }
-        
         return false;
     }
     
@@ -1135,7 +1162,7 @@ public:
         yaw += dYaw;
         pitch += dPitch;
         
-        // Clamp pitch
+        // Clamp pitch to prevent camera flipping
         if (pitch > 89.0f) pitch = 89.0f;
         if (pitch < -89.0f) pitch = -89.0f;
     }
@@ -1184,19 +1211,20 @@ public:
             eye = position + Vector3(0.0f, 1.6f, 0.0f); // Eye level
             center = eye + forward;
         } else {
-            // Third person camera orbits around player
-            float distance = 5.0f;
-            float heightOffset = 2.5f;
+            // Third person camera orbits around player - player always centered
+            float distance = 6.0f;
+            float playerHeight = 1.0f;  // Height of player center
             
-            // Position camera behind and above the player based on yaw and pitch
+            // Camera orbits around the player based on yaw and pitch
+            // Camera is positioned behind and above/below based on pitch
             eye.x = position.x - forward.x * distance;
-            eye.y = position.y + heightOffset - forward.y * distance;
+            eye.y = position.y + playerHeight - forward.y * distance;
             eye.z = position.z - forward.z * distance;
             
-            // Look at a point in front of the player
-            center.x = position.x + forward.x * 2.0f;
-            center.y = position.y + 1.5f + forward.y * 2.0f;
-            center.z = position.z + forward.z * 2.0f;
+            // Always look at the player's center (keeps character centered on screen)
+            center.x = position.x;
+            center.y = position.y + playerHeight;
+            center.z = position.z;
         }
     }
 };
@@ -1205,8 +1233,14 @@ Player player;
 
 // Game state
 int score = 0;
-int health = 100;
+int lives = 5;
+float trapDamageCooldown = 0.0f;  // Cooldown to prevent rapid damage
 bool gameRunning = true;
+bool hasKey = false;  // Whether player has collected the key
+
+// Chest state
+Vector3 chestPosition(8.0f, 0.0f, -8.0f);  // Chest location in Scene 1
+bool chestOpened = false;  // Whether chest has been opened
 
 // Animation timer
 float animationTime = 0.0f;
@@ -1269,6 +1303,12 @@ public:
 // SCENE 1: Crystal Cave Entrance
 // ============================================================================
 
+// Forward declaration for collision callback
+class Scene1_CaveEntrance;
+Scene1_CaveEntrance* scene1Instance = nullptr;
+class Scene2_DeepCavern;
+Scene2_DeepCavern* scene2Instance = nullptr;
+
 class Scene1_CaveEntrance : public Scene {
 private:
     // Scene-specific model pointers for easy access
@@ -1278,7 +1318,22 @@ private:
     OBJModel* pigModel;  // Pink pig model
     OBJModel* minecraftTree;  // Minecraft tree model
     OBJModel* hedgeModel;  // Hedge model for border
-    Model3DS* model3ds;  // 3DS model
+    OBJModel* dogModel;  // Dog OBJ model
+    Model3DS* flockModel;  // Flock 3DS model
+    GLuint grassTexture;  // Floor grass texture
+    GLuint flockTexture;  // Flock/bird texture
+    
+    // Dog position and AI
+    Vector3 dogPosition;
+    float dogRotation;
+    float dogWanderTime;
+    Vector3 dogTargetPosition;
+    float dogMoveSpeed;
+    
+    // Flock position (birds flying)
+    Vector3 flockPosition;
+    float flockRotation;
+    float flockTime;  // For animation
     
     // Pig AI variables
     Vector3 pigPosition;
@@ -1301,10 +1356,24 @@ private:
     };
     std::vector<HedgeInstance> hedgeInstances;
     
+    // Boulder instances
+    struct BoulderInstance {
+        float x, y, z;
+        float scale;
+        float rotationY;
+    };
+    std::vector<BoulderInstance> boulders;
+    GLuint stoneTexture;  // Stone texture for boulders
+    
 public:
     Scene1_CaveEntrance() : Scene("Enchanted Forest"), 
                             caveModel(nullptr), crystalModel(nullptr), entranceRocksModel(nullptr), 
-                            pigModel(nullptr), minecraftTree(nullptr), hedgeModel(nullptr), model3ds(nullptr),
+                            pigModel(nullptr), minecraftTree(nullptr), hedgeModel(nullptr), 
+                            dogModel(nullptr), flockModel(nullptr),
+                            grassTexture(0), stoneTexture(0), flockTexture(0),
+                            dogPosition(-10.0f, 0.0f, 10.0f), dogRotation(0.0f),
+                            dogWanderTime(0.0f), dogTargetPosition(-10.0f, 0.0f, 10.0f), dogMoveSpeed(0.03f),
+                            flockPosition(0.0f, 15.0f, 0.0f), flockRotation(0.0f), flockTime(0.0f),
                             pigPosition(0.0f, 0.0f, -5.0f), pigRotation(0.0f),
                             pigFollowDistance(2.0f), pigMoveSpeed(0.05f) {
         // Bright outdoor daytime lighting
@@ -1355,24 +1424,50 @@ public:
             std::cout << "Failed to load Minecraft tree!" << std::endl;
         }
         
-        // Load the 3DS model
-        model3ds = new Model3DS();
-        if (model3ds->load("models/3ds.3ds")) {
-            std::cout << "3DS model loaded successfully!" << std::endl;
-            model3ds->setPosition(5.0f, 1.5f, 0.0f);  // Position above the floor
-            model3ds->setUniformScale(0.0005f);  // 100x smaller (0.05 / 100)
-        } else {
-            std::cout << "Failed to load 3DS model!" << std::endl;
-            delete model3ds;
-            model3ds = nullptr;
-        }
-        
         // Load the hedge model for the border
         hedgeModel = modelManager.loadModel("hedge", "models/Hedge.obj");
         if (hedgeModel) {
             std::cout << "Hedge model loaded successfully!" << std::endl;
         } else {
             std::cout << "Failed to load hedge model!" << std::endl;
+        }
+        
+        // Load grass texture for the floor
+        grassTexture = loadTexture("models/herbe 2.jpg");
+        if (grassTexture) {
+            std::cout << "Grass texture loaded successfully!" << std::endl;
+        }
+        
+        // Load stone texture for boulders
+        stoneTexture = loadTexture("models/minecraft_stone.jpg");
+        if (stoneTexture) {
+            std::cout << "Stone texture loaded successfully!" << std::endl;
+        }
+        
+        // Load dog model (OBJ with texture)
+        dogModel = new OBJModel();
+        if (dogModel->load("models/dog.obj")) {
+            std::cout << "Dog model loaded successfully!" << std::endl;
+        } else {
+            std::cout << "Failed to load dog model!" << std::endl;
+            delete dogModel;
+            dogModel = nullptr;
+        }
+        
+        // Load flock texture and model
+        flockTexture = loadTexture("models/swallowt.jpg");
+        if (flockTexture) {
+            std::cout << "Flock texture loaded successfully!" << std::endl;
+        }
+        flockModel = new Model3DS();
+        if (flockModel->load("models/Flock N190413.3ds")) {
+            std::cout << "Flock model loaded successfully!" << std::endl;
+            flockModel->setPosition(flockPosition.x, flockPosition.y, flockPosition.z);
+            flockModel->setUniformScale(0.01f);
+        } else {
+            std::cout << "Failed to load flock model!" << std::endl;
+            delete flockModel;
+            flockModel = nullptr;
         }
         
         // Note: Creeper.fbx cannot be loaded (FBX format not supported)
@@ -1383,6 +1478,9 @@ public:
         
         // Generate hedge border
         generateHedgeBorder();
+        
+        // Generate boulders
+        generateBoulders();
         
         // =====================================================
         // ADD COLLECTIBLES
@@ -1411,6 +1509,9 @@ public:
         coin1.glowColor[0] = 1.0f; coin1.glowColor[1] = 0.85f; coin1.glowColor[2] = 0.0f; // Gold
         addCollectible(coin1);
         
+        // Set up collision callback for this scene
+        scene1Instance = this;
+        
         std::cout << "Scene 1 initialized with " << collectibles.size() << " collectibles" << std::endl;
     }
     
@@ -1430,24 +1531,27 @@ public:
         // Draw sky dome (simple gradient effect using a large sphere)
         drawSky();
         
-        // Draw grass ground
+        // Draw grass ground with texture
         glPushMatrix();
-        GLfloat grassDiffuse[] = { 0.2f, 0.5f, 0.15f, 1.0f };  // Forest green
-        GLfloat grassAmbient[] = { 0.1f, 0.25f, 0.08f, 1.0f };
-        glMaterialfv(GL_FRONT, GL_DIFFUSE, grassDiffuse);
-        glMaterialfv(GL_FRONT, GL_AMBIENT, grassAmbient);
-        glColor3f(0.2f, 0.5f, 0.15f);
+        glDisable(GL_LIGHTING);  // Disable lighting for flat texture
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, grassTexture);
+        glColor3f(1.0f, 1.0f, 1.0f);  // White to show texture at full brightness
         glBegin(GL_QUADS);
-            glNormal3f(0.0f, 1.0f, 0.0f);
-            glVertex3f(-50.0f, 0.0f, -50.0f);
-            glVertex3f(-50.0f, 0.0f, 50.0f);
-            glVertex3f(50.0f, 0.0f, 50.0f);
-            glVertex3f(50.0f, 0.0f, -50.0f);
+            glTexCoord2f(0.0f, 0.0f); glVertex3f(-50.0f, 0.0f, -50.0f);
+            glTexCoord2f(0.0f, 50.0f); glVertex3f(-50.0f, 0.0f, 50.0f);
+            glTexCoord2f(50.0f, 50.0f); glVertex3f(50.0f, 0.0f, 50.0f);
+            glTexCoord2f(50.0f, 0.0f); glVertex3f(50.0f, 0.0f, -50.0f);
         glEnd();
+        glDisable(GL_TEXTURE_2D);
+        glEnable(GL_LIGHTING);  // Re-enable lighting for other objects
         glPopMatrix();
         
         // Render hedge border
         renderHedgeBorder();
+        
+        // Render boulders
+        renderBoulders();
         
         // Render all Minecraft tree instances using display list
         if (minecraftTree && minecraftTree->hasDisplayList) {
@@ -1481,7 +1585,7 @@ public:
             glRotatef(pigRotation, 0.0f, 1.0f, 0.0f);  // Rotate to face direction of movement
             glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
             glRotatef(180.0f, 0.0f, 0.0f, 1.0f);
-            glScalef(0.5f, 0.5f, 0.5f);
+            glScalef(1.5f, 1.5f, 1.5f);  // Tripled size
             
             // Set pink material
             GLfloat pinkDiffuse[] = { 1.0f, 0.6f, 0.7f, 1.0f };
@@ -1497,19 +1601,53 @@ public:
             glPopMatrix();
         }
         
-        // Render the 3DS model
-        if (model3ds) {
-            GLfloat modelDiffuse[] = { 0.7f, 0.5f, 0.3f, 1.0f };  // Brown/tan color
-            GLfloat modelAmbient[] = { 0.3f, 0.2f, 0.15f, 1.0f };
-            GLfloat modelSpecular[] = { 0.5f, 0.5f, 0.5f, 1.0f };
-            glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, modelDiffuse);
-            glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, modelAmbient);
-            glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, modelSpecular);
-            glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 32.0f);
-            glColor3f(0.7f, 0.5f, 0.3f);
+        // Render the dog (standing on ground)
+        if (dogModel) {
+            glPushMatrix();
             
-            model3ds->render();
+            // Position dog on the ground
+            float dogScale = 0.04f;  // Halved size
+            glTranslatef(dogPosition.x, 0.0f, dogPosition.z);
+            glRotatef(dogRotation, 0.0f, 1.0f, 0.0f);
+            glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);  // Stand upright
+            glScalef(dogScale, dogScale, dogScale);
+            
+            // White material so texture shows properly
+            GLfloat dogDiffuse[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+            GLfloat dogAmbient[] = { 0.8f, 0.8f, 0.8f, 1.0f };
+            glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, dogDiffuse);
+            glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, dogAmbient);
+            glColor3f(1.0f, 1.0f, 1.0f);
+            
+            dogModel->render();
+            glPopMatrix();
         }
+        
+        // Render the flock (birds flying high in the sky) - 3x bigger
+        if (flockModel) {
+            glPushMatrix();
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, flockTexture);
+            
+            // Flock circles high in the sky
+            glTranslatef(flockPosition.x, flockPosition.y, flockPosition.z);
+            glRotatef(flockRotation, 0.0f, 1.0f, 0.0f);
+            glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
+            glScalef(0.045f, 0.045f, 0.045f);  // 3x bigger (0.015 * 3 = 0.045)
+            
+            GLfloat birdDiffuse[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+            GLfloat birdAmbient[] = { 0.7f, 0.7f, 0.7f, 1.0f };
+            glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, birdDiffuse);
+            glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, birdAmbient);
+            glColor3f(1.0f, 1.0f, 1.0f);
+            
+            flockModel->render();
+            glDisable(GL_TEXTURE_2D);
+            glPopMatrix();
+        }
+        
+        // Draw the treasure chest
+        drawChest();
         
         // Draw some mushrooms and forest details
         drawForestDetails();
@@ -1527,15 +1665,34 @@ public:
         
         // Update pig AI - follow player
         updatePigAI();
+        
+        // Update flock - circle around the scene
+        flockTime += deltaTime;
+        flockRotation += 0.5f;  // Rotate slowly
+        if (flockRotation > 360.0f) flockRotation -= 360.0f;
+        
+        // Flock flies in a circle high in the sky
+        float radius = 25.0f;
+        flockPosition.x = radius * cos(flockTime * 0.3f);
+        flockPosition.z = radius * sin(flockTime * 0.3f);
+        flockPosition.y = 25.0f + 3.0f * sin(flockTime * 0.5f);  // High in sky with up/down motion
+        
+        // Update dog - wander around randomly
+        updateDogAI(deltaTime);
     }
     
     void cleanup() override {
         std::cout << "Cleaning up Scene 1" << std::endl;
         minecraftTrees.clear();
         hedgeInstances.clear();
-        if (model3ds) {
-            delete model3ds;
-            model3ds = nullptr;
+        boulders.clear();
+        if (dogModel) {
+            delete dogModel;
+            dogModel = nullptr;
+        }
+        if (flockModel) {
+            delete flockModel;
+            flockModel = nullptr;
         }
     }
     
@@ -1649,6 +1806,80 @@ private:
         std::cout << "Generated " << hedgeInstances.size() << " hedge segments for border" << std::endl;
     }
     
+    void generateBoulders() {
+        boulders.clear();
+        
+        // Create boulder positions scattered around the scene
+        // Avoid the center area where player spawns
+        float boulderData[][4] = {
+            // {x, z, scale, rotation}
+            {-15.0f, -10.0f, 0.8f, 45.0f},
+            {12.0f, -15.0f, 1.2f, 120.0f},
+            {-20.0f, 5.0f, 0.6f, 200.0f},
+            {18.0f, 8.0f, 1.0f, 75.0f},
+            {-8.0f, 18.0f, 0.9f, 30.0f},
+            {5.0f, -20.0f, 1.1f, 160.0f},
+            {-22.0f, -18.0f, 0.7f, 90.0f},
+            {20.0f, -22.0f, 1.3f, 15.0f},
+            {-25.0f, 15.0f, 0.5f, 270.0f},
+            {25.0f, 20.0f, 0.8f, 180.0f},
+            {-10.0f, -22.0f, 1.0f, 60.0f},
+            {15.0f, 25.0f, 0.9f, 135.0f},
+            {-5.0f, 12.0f, 0.6f, 220.0f},
+            {8.0f, -8.0f, 0.7f, 300.0f},
+            {-18.0f, -5.0f, 1.1f, 45.0f},
+        };
+        
+        int numBoulders = sizeof(boulderData) / sizeof(boulderData[0]);
+        
+        for (int i = 0; i < numBoulders; i++) {
+            BoulderInstance b;
+            b.x = boulderData[i][0];
+            b.z = boulderData[i][1];
+            b.scale = boulderData[i][2];
+            b.y = b.scale * 0.3f;  // Slightly sink into ground based on size
+            b.rotationY = boulderData[i][3];
+            boulders.push_back(b);
+        }
+        
+        std::cout << "Generated " << boulders.size() << " boulders" << std::endl;
+    }
+    
+    void renderBoulders() {
+        if (stoneTexture == 0) return;
+        
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, stoneTexture);
+        
+        // Set stone material
+        GLfloat stoneDiffuse[] = { 0.8f, 0.8f, 0.8f, 1.0f };
+        GLfloat stoneAmbient[] = { 0.4f, 0.4f, 0.4f, 1.0f };
+        GLfloat stoneSpecular[] = { 0.2f, 0.2f, 0.2f, 1.0f };
+        glMaterialfv(GL_FRONT, GL_DIFFUSE, stoneDiffuse);
+        glMaterialfv(GL_FRONT, GL_AMBIENT, stoneAmbient);
+        glMaterialfv(GL_FRONT, GL_SPECULAR, stoneSpecular);
+        glMaterialf(GL_FRONT, GL_SHININESS, 10.0f);
+        glColor3f(0.8f, 0.8f, 0.8f);
+        
+        for (const auto& boulder : boulders) {
+            glPushMatrix();
+            glTranslatef(boulder.x, boulder.y, boulder.z);
+            glRotatef(boulder.rotationY, 0.0f, 1.0f, 0.0f);
+            glScalef(boulder.scale, boulder.scale * 0.7f, boulder.scale);  // Flatten slightly
+            
+            // Draw textured sphere as boulder
+            GLUquadric* quad = gluNewQuadric();
+            gluQuadricTexture(quad, GL_TRUE);
+            gluQuadricNormals(quad, GLU_SMOOTH);
+            gluSphere(quad, 1.0f, 16, 12);
+            gluDeleteQuadric(quad);
+            
+            glPopMatrix();
+        }
+        
+        glDisable(GL_TEXTURE_2D);
+    }
+    
     void renderHedgeBorder() {
         if (!hedgeModel || !hedgeModel->hasDisplayList) return;
         
@@ -1716,6 +1947,103 @@ private:
         glPopMatrix();
         
         glEnable(GL_LIGHTING);
+        glPopMatrix();
+    }
+    
+    void drawChest() {
+        glPushMatrix();
+        glTranslatef(chestPosition.x, chestPosition.y, chestPosition.z);
+        
+        // Rotate slightly for visual interest
+        glRotatef(25.0f, 0.0f, 1.0f, 0.0f);
+        
+        glDisable(GL_TEXTURE_2D);
+        
+        // Chest dimensions
+        float chestWidth = 1.2f;
+        float chestHeight = 0.8f;
+        float chestDepth = 0.8f;
+        
+        // Base (bottom box) - brown wood
+        GLfloat woodDiffuse[] = { 0.55f, 0.35f, 0.15f, 1.0f };
+        GLfloat woodAmbient[] = { 0.25f, 0.15f, 0.05f, 1.0f };
+        GLfloat woodSpecular[] = { 0.2f, 0.15f, 0.1f, 1.0f };
+        glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, woodDiffuse);
+        glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, woodAmbient);
+        glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, woodSpecular);
+        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 10.0f);
+        glColor3f(0.55f, 0.35f, 0.15f);
+        
+        glPushMatrix();
+        glTranslatef(0.0f, chestHeight * 0.4f, 0.0f);
+        glScalef(chestWidth, chestHeight * 0.8f, chestDepth);
+        glutSolidCube(1.0f);
+        glPopMatrix();
+        
+        // Lid - slightly different shade if opened
+        if (chestOpened) {
+            // Open lid - rotated back
+            GLfloat openDiffuse[] = { 0.45f, 0.28f, 0.12f, 1.0f };
+            glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, openDiffuse);
+            glColor3f(0.45f, 0.28f, 0.12f);
+            
+            glPushMatrix();
+            glTranslatef(0.0f, chestHeight * 0.8f, -chestDepth * 0.4f);
+            glRotatef(-110.0f, 1.0f, 0.0f, 0.0f);  // Lid open
+            glTranslatef(0.0f, 0.0f, chestDepth * 0.2f);
+            glScalef(chestWidth * 1.02f, 0.15f, chestDepth);
+            glutSolidCube(1.0f);
+            glPopMatrix();
+            
+            // Gold inside the chest (visible when open)
+            GLfloat goldDiffuse[] = { 1.0f, 0.84f, 0.0f, 1.0f };
+            GLfloat goldAmbient[] = { 0.4f, 0.35f, 0.0f, 1.0f };
+            GLfloat goldSpecular[] = { 1.0f, 0.95f, 0.7f, 1.0f };
+            glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, goldDiffuse);
+            glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, goldAmbient);
+            glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, goldSpecular);
+            glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 80.0f);
+            glColor3f(1.0f, 0.84f, 0.0f);
+            
+            glPushMatrix();
+            glTranslatef(0.0f, chestHeight * 0.5f, 0.0f);
+            glScalef(chestWidth * 0.7f, chestHeight * 0.3f, chestDepth * 0.6f);
+            glutSolidCube(1.0f);
+            glPopMatrix();
+        } else {
+            // Closed lid
+            glPushMatrix();
+            glTranslatef(0.0f, chestHeight * 0.85f, 0.0f);
+            glScalef(chestWidth * 1.02f, 0.15f, chestDepth * 1.02f);
+            glutSolidCube(1.0f);
+            glPopMatrix();
+        }
+        
+        // Metal bands - gold trim
+        GLfloat metalDiffuse[] = { 0.83f, 0.69f, 0.22f, 1.0f };
+        GLfloat metalAmbient[] = { 0.4f, 0.33f, 0.1f, 1.0f };
+        GLfloat metalSpecular[] = { 1.0f, 0.9f, 0.5f, 1.0f };
+        glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, metalDiffuse);
+        glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, metalAmbient);
+        glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, metalSpecular);
+        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 60.0f);
+        glColor3f(0.83f, 0.69f, 0.22f);
+        
+        // Front band
+        glPushMatrix();
+        glTranslatef(0.0f, chestHeight * 0.4f, chestDepth * 0.51f);
+        glScalef(chestWidth * 1.05f, 0.08f, 0.05f);
+        glutSolidCube(1.0f);
+        glPopMatrix();
+        
+        // Lock (if not opened)
+        if (!chestOpened) {
+            glPushMatrix();
+            glTranslatef(0.0f, chestHeight * 0.75f, chestDepth * 0.52f);
+            glutSolidSphere(0.1f, 8, 8);
+            glPopMatrix();
+        }
+        
         glPopMatrix();
     }
     
@@ -1820,7 +2148,93 @@ private:
             pigRotation = atan2(dx, -dz) * 180.0f / M_PI;
         }
     }
+    
+    void updateDogAI(float deltaTime) {
+        dogWanderTime += deltaTime;
+        
+        // Pick a new random target every 3-5 seconds
+        if (dogWanderTime > 3.0f + (rand() % 20) / 10.0f) {
+            dogWanderTime = 0.0f;
+            // Pick random position within bounds (avoid edges)
+            dogTargetPosition.x = -15.0f + (rand() % 300) / 10.0f;
+            dogTargetPosition.z = -15.0f + (rand() % 300) / 10.0f;
+        }
+        
+        // Move towards target
+        float dx = dogTargetPosition.x - dogPosition.x;
+        float dz = dogTargetPosition.z - dogPosition.z;
+        float distance = sqrt(dx * dx + dz * dz);
+        
+        if (distance > 0.5f) {
+            // Normalize direction
+            float dirX = dx / distance;
+            float dirZ = dz / distance;
+            
+            // Move dog towards target
+            dogPosition.x += dirX * dogMoveSpeed;
+            dogPosition.z += dirZ * dogMoveSpeed;
+            
+            // Calculate rotation to face movement direction
+            dogRotation = atan2(dx, -dz) * 180.0f / M_PI;
+        }
+    }
+    
+public:
+    // Check if a position collides with scene objects
+    bool checkSceneCollision(float x, float z, float radius) {
+        // Check collision with trees
+        for (const auto& tree : minecraftTrees) {
+            float dx = x - tree.x;
+            float dz = z - tree.z;
+            float dist = sqrt(dx * dx + dz * dz);
+            float treeRadius = 1.0f;  // Tree trunk radius
+            if (dist < radius + treeRadius) return true;
+        }
+        
+        // Check collision with hedges (border)
+        float borderLimit = 38.0f;  // Just inside the hedge border
+        if (fabs(x) > borderLimit || fabs(z) > borderLimit) return true;
+        
+        // Check collision with boulders
+        for (const auto& boulder : boulders) {
+            float dx = x - boulder.x;
+            float dz = z - boulder.z;
+            float dist = sqrt(dx * dx + dz * dz);
+            float boulderRadius = boulder.scale * 0.8f;
+            if (dist < radius + boulderRadius) return true;
+        }
+        
+        // Check collision with pig
+        {
+            float dx = x - pigPosition.x;
+            float dz = z - pigPosition.z;
+            float dist = sqrt(dx * dx + dz * dz);
+            if (dist < radius + 1.5f) return true;  // Pig collision radius
+        }
+        
+        // Check collision with dog
+        {
+            float dx = x - dogPosition.x;
+            float dz = z - dogPosition.z;
+            float dist = sqrt(dx * dx + dz * dz);
+            if (dist < radius + 0.5f) return true;  // Dog collision radius
+        }
+        
+        return false;
+    }
 };
+
+// Static collision check function for Scene1
+bool scene1CollisionCheck(float x, float z, float radius) {
+    if (scene1Instance) {
+        return scene1Instance->checkSceneCollision(x, z, radius);
+    }
+    return false;
+}
+
+// Forward declaration for Scene2 collision - defined after Scene2 class
+bool scene2CollisionCheck(float x, float z, float radius);
+int lastScene2CollisionType = 0;  // 0=none, 1=stone, 2=trap, 3=wall
 
 // ============================================================================
 // SCENE 2: Deep Crystal Cavern
@@ -1828,148 +2242,386 @@ private:
 
 class Scene2_DeepCavern : public Scene {
 private:
-    OBJModel* deepCaveModel;
-    OBJModel* largeCrystalModel;
-    OBJModel* stalactiteModel;
+    GLuint stoneTexture;  // Stone texture for walls/floor/ceiling
+    
+    // Room dimensions
+    float roomWidth = 40.0f;
+    float roomHeight = 15.0f;
+    float roomDepth = 40.0f;
+    
+    // Torch data
+    struct Torch {
+        Vector3 position;
+        float flickerPhase;
+        float flickerSpeed;
+        float intensity;
+    };
+    std::vector<Torch> torches;
+    
+    // Stones and traps
+    OBJModel* stonesModel = nullptr;
+    OBJModel* trapModel = nullptr;
+    
+    struct Stone {
+        Vector3 position;
+        float rotation;
+        float scale;
+    };
+    std::vector<Stone> stones;
+    
+    struct Trap {
+        Vector3 position;
+        float rotation;
+        float collisionRadius;
+    };
+    std::vector<Trap> traps;
     
 public:
-    Scene2_DeepCavern() : Scene("Deep Crystal Cavern"),
-                          deepCaveModel(nullptr), largeCrystalModel(nullptr), stalactiteModel(nullptr) {
-        // Darker ambient for deep cave
-        ambientLight[0] = 0.1f;
-        ambientLight[1] = 0.1f;
-        ambientLight[2] = 0.2f;
+    Scene2_DeepCavern() : Scene("Dark Stone Dungeon"), stoneTexture(0) {
+        // Very dark ambient for dungeon atmosphere
+        ambientLight[0] = 0.05f;
+        ambientLight[1] = 0.04f;
+        ambientLight[2] = 0.03f;
+        scene2Instance = this;  // Set global instance for collision callback
+    }
+    
+    // Collision check for stones only (blocks movement)
+    // Returns: 0 = no collision, 1 = stone collision, 3 = wall collision
+    int checkSceneCollision(float x, float z, float radius) {
+        float hw = roomWidth / 2.0f - radius;
+        float hd = roomDepth / 2.0f - radius;
+        
+        // Wall collision
+        if (x < -hw || x > hw || z < -hd || z > hd) {
+            return 3;
+        }
+        
+        // Stone collision (blocks movement)
+        for (const auto& stone : stones) {
+            float dx = x - stone.position.x;
+            float dz = z - stone.position.z;
+            float dist = sqrt(dx*dx + dz*dz);
+            if (dist < radius + stone.scale * 1.2f) {
+                return 1;
+            }
+        }
+        
+        // Traps do NOT block movement - player can walk through them
+        return 0;
+    }
+    
+    // Check if player is touching a trap (for damage, doesn't block movement)
+    bool checkTrapCollision(float x, float z, float radius) {
+        for (const auto& trap : traps) {
+            float dx = x - trap.position.x;
+            float dz = z - trap.position.z;
+            float dist = sqrt(dx*dx + dz*dz);
+            if (dist < radius + trap.collisionRadius) {
+                return true;  // Touching a trap!
+            }
+        }
+        return false;
     }
     
     void init() override {
         std::cout << "Initializing Scene 2: " << name << std::endl;
         
-        // =====================================================
-        // LOAD YOUR 3D MODELS FOR SCENE 2 HERE
-        // =====================================================
-        // Example:
-        // deepCaveModel = modelManager.loadModel("deep_cave", "models/deep_cave.obj");
-        // largeCrystalModel = modelManager.loadModel("large_crystal", "models/large_crystal.obj");
+        // Load stone texture
+        stoneTexture = loadTexture("models/minecraft_stone.jpg");
+        if (stoneTexture) {
+            std::cout << "Stone texture loaded for dungeon!" << std::endl;
+        }
         
-        // =====================================================
-        // ADD COLLECTIBLES FOR SCENE 2
-        // =====================================================
+        // Load stones and trap models
+        stonesModel = new OBJModel();
+        if (stonesModel->load("models/stones.obj")) {
+            std::cout << "Stones model loaded!" << std::endl;
+        }
         
-        // Rare purple gem
-        Collectible rareGem;
-        rareGem.position = Vector3(0.0f, 0.5f, -5.0f);
-        rareGem.points = 500;
-        rareGem.type = "rare_gem";
-        rareGem.glowColor[0] = 0.8f; rareGem.glowColor[1] = 0.2f; rareGem.glowColor[2] = 0.9f;
-        addCollectible(rareGem);
+        trapModel = new OBJModel();
+        if (trapModel->load("models/trap.obj")) {
+            std::cout << "Trap model loaded!" << std::endl;
+        }
         
-        // Blue crystals
-        Collectible crystal1;
-        crystal1.position = Vector3(-4.0f, 0.5f, -3.0f);
-        crystal1.points = 150;
-        crystal1.type = "crystal";
-        crystal1.glowColor[0] = 0.2f; crystal1.glowColor[1] = 0.4f; crystal1.glowColor[2] = 1.0f;
-        addCollectible(crystal1);
+        // Place stones around the dungeon - some small, some 2x, some 4x scale
+        stones.push_back({Vector3(-12.0f, 0.0f, -12.0f), 45.0f, 4.0f});   // 4x scale - big boulder
+        stones.push_back({Vector3(10.0f, 0.0f, -8.0f), 120.0f, 2.0f});    // 2x scale
+        stones.push_back({Vector3(-8.0f, 0.0f, 6.0f), 200.0f, 1.0f});     // normal
+        stones.push_back({Vector3(14.0f, 0.0f, 10.0f), 75.0f, 4.0f});     // 4x scale - big boulder
+        stones.push_back({Vector3(-5.0f, 0.0f, -15.0f), 300.0f, 2.0f});   // 2x scale
+        stones.push_back({Vector3(6.0f, 0.0f, 12.0f), 160.0f, 1.0f});     // normal
+        stones.push_back({Vector3(-15.0f, 0.0f, 0.0f), 30.0f, 2.0f});     // 2x scale
+        stones.push_back({Vector3(0.0f, 0.0f, -10.0f), 90.0f, 4.0f});     // 4x scale - big boulder
         
-        Collectible crystal2;
-        crystal2.position = Vector3(4.0f, 0.5f, 2.0f);
-        crystal2.points = 150;
-        crystal2.type = "crystal";
-        crystal2.glowColor[0] = 0.2f; crystal2.glowColor[1] = 0.4f; crystal2.glowColor[2] = 1.0f;
-        addCollectible(crystal2);
+        // Place traps in the dungeon (dangerous!)
+        traps.push_back({Vector3(-6.0f, 0.0f, -6.0f), 0.0f, 1.5f});
+        traps.push_back({Vector3(8.0f, 0.0f, 4.0f), 45.0f, 1.5f});
+        traps.push_back({Vector3(-10.0f, 0.0f, 10.0f), 90.0f, 1.5f});
+        traps.push_back({Vector3(12.0f, 0.0f, -10.0f), 135.0f, 1.5f});
+        traps.push_back({Vector3(0.0f, 0.0f, 8.0f), 180.0f, 1.5f});
         
-        std::cout << "Scene 2 initialized with " << collectibles.size() << " collectibles" << std::endl;
+        // Create torches on the walls
+        float torchHeight = 5.0f;
+        float halfWidth = roomWidth / 2.0f - 0.5f;
+        float halfDepth = roomDepth / 2.0f - 0.5f;
+        
+        // Torches on north wall (negative Z)
+        torches.push_back({Vector3(-10.0f, torchHeight, -halfDepth), 0.0f, 3.5f, 1.0f});
+        torches.push_back({Vector3(10.0f, torchHeight, -halfDepth), 1.5f, 4.0f, 1.0f});
+        
+        // Torches on south wall (positive Z)
+        torches.push_back({Vector3(-10.0f, torchHeight, halfDepth), 0.7f, 3.8f, 1.0f});
+        torches.push_back({Vector3(10.0f, torchHeight, halfDepth), 2.1f, 3.2f, 1.0f});
+        
+        // Torches on west wall (negative X)
+        torches.push_back({Vector3(-halfWidth, torchHeight, -10.0f), 1.2f, 4.2f, 1.0f});
+        torches.push_back({Vector3(-halfWidth, torchHeight, 10.0f), 0.3f, 3.6f, 1.0f});
+        
+        // Torches on east wall (positive X)
+        torches.push_back({Vector3(halfWidth, torchHeight, -10.0f), 1.8f, 3.4f, 1.0f});
+        torches.push_back({Vector3(halfWidth, torchHeight, 10.0f), 2.5f, 4.5f, 1.0f});
+        
+        std::cout << "Scene 2 initialized with " << torches.size() << " torches, " 
+                  << stones.size() << " stones, and " << traps.size() << " traps" << std::endl;
     }
     
     void render() override {
-        // Set scene-specific lighting (darker, more mysterious)
+        // Set very dark ambient lighting
         glLightModelfv(GL_LIGHT_MODEL_AMBIENT, ambientLight);
         
-        // Crystal glow lights (multiple point lights)
-        GLfloat light1Pos[] = { -5.0f, 3.0f, -5.0f, 1.0f };
-        GLfloat light1Diffuse[] = { 0.3f, 0.5f, 0.8f, 1.0f }; // Blue glow
-        
-        GLfloat light2Pos[] = { 5.0f, 3.0f, 5.0f, 1.0f };
-        GLfloat light2Diffuse[] = { 0.8f, 0.3f, 0.8f, 1.0f }; // Purple glow
-        
-        glLightfv(GL_LIGHT0, GL_POSITION, light1Pos);
-        glLightfv(GL_LIGHT0, GL_DIFFUSE, light1Diffuse);
-        
-        glEnable(GL_LIGHT1);
-        glLightfv(GL_LIGHT1, GL_POSITION, light2Pos);
-        glLightfv(GL_LIGHT1, GL_DIFFUSE, light2Diffuse);
-        
-        // Draw ground plane (darker cave floor)
-        glPushMatrix();
-        glColor3f(0.15f, 0.12f, 0.1f); // Dark brown cave floor
-        glBegin(GL_QUADS);
-            glNormal3f(0.0f, 1.0f, 0.0f);
-            glVertex3f(-20.0f, 0.0f, -20.0f);
-            glVertex3f(-20.0f, 0.0f, 20.0f);
-            glVertex3f(20.0f, 0.0f, 20.0f);
-            glVertex3f(20.0f, 0.0f, -20.0f);
-        glEnd();
-        glPopMatrix();
-        
-        // Render all loaded OBJ models
-        for (auto* model : sceneModels) {
-            if (model) model->render();
+        // Set up torch lights with flickering effect
+        int lightIndex = 0;
+        for (size_t i = 0; i < torches.size() && lightIndex < 8; i++) {
+            GLenum light = GL_LIGHT0 + lightIndex;
+            glEnable(light);
+            
+            GLfloat lightPos[] = { torches[i].position.x, torches[i].position.y, torches[i].position.z, 1.0f };
+            
+            // Flickering orange/yellow light
+            float flicker = torches[i].intensity;
+            GLfloat lightDiffuse[] = { 1.0f * flicker, 0.6f * flicker, 0.2f * flicker, 1.0f };
+            GLfloat lightAmbient[] = { 0.1f * flicker, 0.05f * flicker, 0.02f * flicker, 1.0f };
+            GLfloat lightSpecular[] = { 0.5f * flicker, 0.3f * flicker, 0.1f * flicker, 1.0f };
+            
+            // Attenuation for realistic light falloff
+            glLightf(light, GL_CONSTANT_ATTENUATION, 0.5f);
+            glLightf(light, GL_LINEAR_ATTENUATION, 0.05f);
+            glLightf(light, GL_QUADRATIC_ATTENUATION, 0.01f);
+            
+            glLightfv(light, GL_POSITION, lightPos);
+            glLightfv(light, GL_DIFFUSE, lightDiffuse);
+            glLightfv(light, GL_AMBIENT, lightAmbient);
+            glLightfv(light, GL_SPECULAR, lightSpecular);
+            
+            lightIndex++;
         }
         
-        // Draw larger crystal formations (placeholders)
-        drawLargeCrystalFormation(-5.0f, 0.0f, -5.0f, 0.2f, 0.4f, 0.9f); // Blue crystals
-        drawLargeCrystalFormation(5.0f, 0.0f, 5.0f, 0.9f, 0.2f, 0.9f);   // Magenta crystals
-        drawLargeCrystalFormation(0.0f, 0.0f, -8.0f, 0.2f, 0.9f, 0.9f);  // Cyan crystals
+        // Enable texturing
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, stoneTexture);
         
-        // Render collectibles
-        renderCollectibles();
+        // Set material for stone surfaces
+        GLfloat stoneDiffuse[] = { 0.8f, 0.8f, 0.8f, 1.0f };
+        GLfloat stoneAmbient[] = { 0.3f, 0.3f, 0.3f, 1.0f };
+        GLfloat stoneSpecular[] = { 0.1f, 0.1f, 0.1f, 1.0f };
+        glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, stoneDiffuse);
+        glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, stoneAmbient);
+        glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, stoneSpecular);
+        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 10.0f);
+        glColor3f(1.0f, 1.0f, 1.0f);
         
-        glDisable(GL_LIGHT1);
+        float hw = roomWidth / 2.0f;
+        float hd = roomDepth / 2.0f;
+        float tileSize = 4.0f;  // Texture tiling
+        
+        // Draw floor
+        glBegin(GL_QUADS);
+        glNormal3f(0.0f, 1.0f, 0.0f);
+        glTexCoord2f(0.0f, 0.0f); glVertex3f(-hw, 0.0f, -hd);
+        glTexCoord2f(0.0f, roomDepth/tileSize); glVertex3f(-hw, 0.0f, hd);
+        glTexCoord2f(roomWidth/tileSize, roomDepth/tileSize); glVertex3f(hw, 0.0f, hd);
+        glTexCoord2f(roomWidth/tileSize, 0.0f); glVertex3f(hw, 0.0f, -hd);
+        glEnd();
+        
+        // Draw ceiling
+        glBegin(GL_QUADS);
+        glNormal3f(0.0f, -1.0f, 0.0f);
+        glTexCoord2f(0.0f, 0.0f); glVertex3f(-hw, roomHeight, -hd);
+        glTexCoord2f(roomWidth/tileSize, 0.0f); glVertex3f(hw, roomHeight, -hd);
+        glTexCoord2f(roomWidth/tileSize, roomDepth/tileSize); glVertex3f(hw, roomHeight, hd);
+        glTexCoord2f(0.0f, roomDepth/tileSize); glVertex3f(-hw, roomHeight, hd);
+        glEnd();
+        
+        // Draw north wall (negative Z)
+        glBegin(GL_QUADS);
+        glNormal3f(0.0f, 0.0f, 1.0f);
+        glTexCoord2f(0.0f, 0.0f); glVertex3f(-hw, 0.0f, -hd);
+        glTexCoord2f(roomWidth/tileSize, 0.0f); glVertex3f(hw, 0.0f, -hd);
+        glTexCoord2f(roomWidth/tileSize, roomHeight/tileSize); glVertex3f(hw, roomHeight, -hd);
+        glTexCoord2f(0.0f, roomHeight/tileSize); glVertex3f(-hw, roomHeight, -hd);
+        glEnd();
+        
+        // Draw south wall (positive Z)
+        glBegin(GL_QUADS);
+        glNormal3f(0.0f, 0.0f, -1.0f);
+        glTexCoord2f(0.0f, 0.0f); glVertex3f(hw, 0.0f, hd);
+        glTexCoord2f(roomWidth/tileSize, 0.0f); glVertex3f(-hw, 0.0f, hd);
+        glTexCoord2f(roomWidth/tileSize, roomHeight/tileSize); glVertex3f(-hw, roomHeight, hd);
+        glTexCoord2f(0.0f, roomHeight/tileSize); glVertex3f(hw, roomHeight, hd);
+        glEnd();
+        
+        // Draw west wall (negative X)
+        glBegin(GL_QUADS);
+        glNormal3f(1.0f, 0.0f, 0.0f);
+        glTexCoord2f(0.0f, 0.0f); glVertex3f(-hw, 0.0f, hd);
+        glTexCoord2f(roomDepth/tileSize, 0.0f); glVertex3f(-hw, 0.0f, -hd);
+        glTexCoord2f(roomDepth/tileSize, roomHeight/tileSize); glVertex3f(-hw, roomHeight, -hd);
+        glTexCoord2f(0.0f, roomHeight/tileSize); glVertex3f(-hw, roomHeight, hd);
+        glEnd();
+        
+        // Draw east wall (positive X)
+        glBegin(GL_QUADS);
+        glNormal3f(-1.0f, 0.0f, 0.0f);
+        glTexCoord2f(0.0f, 0.0f); glVertex3f(hw, 0.0f, -hd);
+        glTexCoord2f(roomDepth/tileSize, 0.0f); glVertex3f(hw, 0.0f, hd);
+        glTexCoord2f(roomDepth/tileSize, roomHeight/tileSize); glVertex3f(hw, roomHeight, hd);
+        glTexCoord2f(0.0f, roomHeight/tileSize); glVertex3f(hw, roomHeight, -hd);
+        glEnd();
+        
+        glDisable(GL_TEXTURE_2D);
+        
+        // Draw stones
+        if (stonesModel) {
+            for (const auto& stone : stones) {
+                glPushMatrix();
+                glTranslatef(stone.position.x, stone.position.y, stone.position.z);
+                glRotatef(stone.rotation, 0.0f, 1.0f, 0.0f);
+                glScalef(stone.scale, stone.scale, stone.scale);
+                stonesModel->render();
+                glPopMatrix();
+            }
+        }
+        
+        // Draw traps
+        if (trapModel) {
+            for (const auto& trap : traps) {
+                glPushMatrix();
+                glTranslatef(trap.position.x, trap.position.y, trap.position.z);
+                glRotatef(trap.rotation, 0.0f, 1.0f, 0.0f);
+                glScalef(1.5f, 1.5f, 1.5f);  // Scale traps to be visible
+                trapModel->render();
+                glPopMatrix();
+            }
+        }
+        
+        // Draw torches
+        for (const auto& torch : torches) {
+            drawTorch(torch);
+        }
+        
+        // Disable extra lights
+        for (int i = 0; i < 8; i++) {
+            if (i > 0) glDisable(GL_LIGHT0 + i);
+        }
     }
     
     void update(float deltaTime) override {
-        // Update collectibles
-        updateCollectibles(deltaTime, animationTime);
+        // Update torch flickering
+        for (auto& torch : torches) {
+            torch.flickerPhase += deltaTime * torch.flickerSpeed;
+            // Random-ish flickering using multiple sine waves
+            float flicker1 = sin(torch.flickerPhase * 7.3f) * 0.1f;
+            float flicker2 = sin(torch.flickerPhase * 11.7f) * 0.05f;
+            float flicker3 = sin(torch.flickerPhase * 23.1f) * 0.03f;
+            torch.intensity = 0.85f + flicker1 + flicker2 + flicker3;
+            torch.intensity = std::max(0.6f, std::min(1.0f, torch.intensity));
+        }
     }
     
     void cleanup() override {
         std::cout << "Cleaning up Scene 2" << std::endl;
-        // TODO: Unload models specific to this scene
+        if (stoneTexture) {
+            glDeleteTextures(1, &stoneTexture);
+            stoneTexture = 0;
+        }
+        if (stonesModel) {
+            delete stonesModel;
+            stonesModel = nullptr;
+        }
+        if (trapModel) {
+            delete trapModel;
+            trapModel = nullptr;
+        }
+        torches.clear();
+        stones.clear();
+        traps.clear();
     }
     
 private:
-    void drawLargeCrystalFormation(float x, float y, float z, float r, float g, float b) {
-        // Draw a cluster of crystals
-        for (int i = 0; i < 5; i++) {
-            float offsetX = (i % 3 - 1) * 0.8f;
-            float offsetZ = (i / 3 - 0.5f) * 0.8f;
-            float height = 2.0f + (i % 2) * 1.5f;
-            float angle = i * 15.0f;
-            
-            glPushMatrix();
-            glTranslatef(x + offsetX, y, z + offsetZ);
-            glRotatef(angle, 0.0f, 0.0f, 1.0f);
-            glRotatef(animationTime * 10.0f + i * 30.0f, 0.0f, 1.0f, 0.0f);
-            
-            // Pulsing glow effect
-            float pulse = 0.5f + 0.5f * sin(animationTime * 2.0f + i);
-            
-            GLfloat matEmission[] = { r * 0.4f * pulse, g * 0.4f * pulse, b * 0.4f * pulse, 1.0f };
-            GLfloat matDiffuse[] = { r, g, b, 0.9f };
-            
-            glMaterialfv(GL_FRONT, GL_EMISSION, matEmission);
-            glMaterialfv(GL_FRONT, GL_DIFFUSE, matDiffuse);
-            
-            glColor4f(r, g, b, 0.9f);
-            glutSolidCone(0.4, height, 6, 4);
-            
-            GLfloat noEmission[] = { 0.0f, 0.0f, 0.0f, 1.0f };
-            glMaterialfv(GL_FRONT, GL_EMISSION, noEmission);
-            
-            glPopMatrix();
+    void drawTorch(const Torch& torch) {
+        glPushMatrix();
+        glTranslatef(torch.position.x, torch.position.y, torch.position.z);
+        
+        // Rotate torch to face into room based on wall position
+        float hw = roomWidth / 2.0f - 0.5f;
+        float hd = roomDepth / 2.0f - 0.5f;
+        if (fabs(torch.position.x) > fabs(torch.position.z)) {
+            // On east/west wall
+            if (torch.position.x > 0) glRotatef(-90.0f, 0.0f, 1.0f, 0.0f);
+            else glRotatef(90.0f, 0.0f, 1.0f, 0.0f);
+        } else {
+            // On north/south wall
+            if (torch.position.z > 0) glRotatef(180.0f, 0.0f, 1.0f, 0.0f);
         }
+        
+        // Draw torch handle (brown)
+        glDisable(GL_TEXTURE_2D);
+        GLfloat handleDiffuse[] = { 0.4f, 0.25f, 0.1f, 1.0f };
+        GLfloat handleAmbient[] = { 0.2f, 0.1f, 0.05f, 1.0f };
+        glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, handleDiffuse);
+        glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, handleAmbient);
+        glColor3f(0.4f, 0.25f, 0.1f);
+        
+        glPushMatrix();
+        glRotatef(-30.0f, 1.0f, 0.0f, 0.0f);  // Angle the torch
+        glTranslatef(0.0f, 0.0f, 0.3f);
+        
+        // Torch stick
+        GLUquadric* quad = gluNewQuadric();
+        gluCylinder(quad, 0.08f, 0.06f, 0.8f, 8, 1);
+        
+        // Torch head (fire)
+        glTranslatef(0.0f, 0.0f, 0.8f);
+        
+        // Emissive fire glow
+        float glow = torch.intensity;
+        GLfloat fireEmission[] = { 1.0f * glow, 0.5f * glow, 0.1f * glow, 1.0f };
+        GLfloat fireDiffuse[] = { 1.0f, 0.6f, 0.1f, 1.0f };
+        glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, fireEmission);
+        glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, fireDiffuse);
+        glColor3f(1.0f * glow, 0.5f * glow, 0.1f);
+        
+        // Draw flame as a cone
+        glutSolidCone(0.15f, 0.4f * (0.8f + 0.2f * glow), 8, 4);
+        
+        // Reset emission
+        GLfloat noEmission[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+        glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, noEmission);
+        
+        gluDeleteQuadric(quad);
+        glPopMatrix();
+        glPopMatrix();
     }
 };
+
+// Static collision check function for Scene2 (only blocks on walls and stones)
+bool scene2CollisionCheck(float x, float z, float radius) {
+    if (scene2Instance) {
+        lastScene2CollisionType = scene2Instance->checkSceneCollision(x, z, radius);
+        return lastScene2CollisionType != 0;  // Only walls (3) and stones (1) block movement
+    }
+    return false;
+}
 
 // ============================================================================
 // SCENE MANAGER
@@ -1988,6 +2640,7 @@ void initScenes() {
     
     currentScenePtr = scene1;
     currentScene = 1;
+    sceneCollisionCheck = scene1CollisionCheck;  // Set collision check for scene 1
 }
 
 void switchScene(int sceneNumber) {
@@ -1998,9 +2651,11 @@ void switchScene(int sceneNumber) {
     if (sceneNumber == 1) {
         currentScenePtr = scene1;
         currentScene = 1;
+        sceneCollisionCheck = scene1CollisionCheck;
     } else if (sceneNumber == 2) {
         currentScenePtr = scene2;
         currentScene = 2;
+        sceneCollisionCheck = scene2CollisionCheck;  // Collision with stones, traps, walls
     }
 }
 
@@ -2064,6 +2719,89 @@ void renderHUD() {
         glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, c);
     }
     
+    // Draw lives (hearts) in top right corner
+    glColor3f(1.0f, 0.2f, 0.2f);  // Red color for hearts
+    std::string livesText = "Lives: ";
+    for (int i = 0; i < lives; i++) {
+        livesText += "\x03 ";  // Heart symbol (works on some systems)
+    }
+    // Fallback to numeric display
+    livesText = "Lives: " + std::to_string(lives) + "/5";
+    glRasterPos2f(windowWidth - 120, windowHeight - 30);
+    for (char c : livesText) {
+        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, c);
+    }
+    
+    // Draw key indicator if player has key
+    if (hasKey) {
+        glColor3f(1.0f, 0.84f, 0.0f);  // Gold color for key
+        std::string keyText = "[KEY]";
+        glRasterPos2f(windowWidth - 120, windowHeight - 55);
+        for (char c : keyText) {
+            glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, c);
+        }
+    }
+    
+    // Draw crosshair in center of screen
+    float centerX = windowWidth / 2.0f;
+    float centerY = windowHeight / 2.0f;
+    float crosshairSize = 12.0f;
+    float crosshairThickness = 2.0f;
+    
+    glColor3f(1.0f, 1.0f, 1.0f);  // White crosshair
+    glLineWidth(crosshairThickness);
+    
+    glBegin(GL_LINES);
+    // Horizontal line
+    glVertex2f(centerX - crosshairSize, centerY);
+    glVertex2f(centerX - 4, centerY);
+    glVertex2f(centerX + 4, centerY);
+    glVertex2f(centerX + crosshairSize, centerY);
+    // Vertical line
+    glVertex2f(centerX, centerY - crosshairSize);
+    glVertex2f(centerX, centerY - 4);
+    glVertex2f(centerX, centerY + 4);
+    glVertex2f(centerX, centerY + crosshairSize);
+    glEnd();
+    
+    // Small dot in center
+    glPointSize(3.0f);
+    glBegin(GL_POINTS);
+    glVertex2f(centerX, centerY);
+    glEnd();
+    glPointSize(1.0f);
+    glLineWidth(1.0f);
+    
+    // Draw damage flash if recently hit
+    if (trapDamageCooldown > 1.2f) {
+        glColor4f(1.0f, 0.0f, 0.0f, 0.3f);  // Semi-transparent red
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glBegin(GL_QUADS);
+        glVertex2f(0, 0);
+        glVertex2f(windowWidth, 0);
+        glVertex2f(windowWidth, windowHeight);
+        glVertex2f(0, windowHeight);
+        glEnd();
+        glDisable(GL_BLEND);
+    }
+    
+    // Draw game over message if dead
+    if (lives <= 0) {
+        glColor3f(1.0f, 0.0f, 0.0f);
+        std::string gameOverText = "GAME OVER!";
+        glRasterPos2f(windowWidth / 2 - 60, windowHeight / 2);
+        for (char c : gameOverText) {
+            glutBitmapCharacter(GLUT_BITMAP_TIMES_ROMAN_24, c);
+        }
+        glColor3f(1.0f, 1.0f, 1.0f);
+        std::string restartText = "Press R to restart";
+        glRasterPos2f(windowWidth / 2 - 80, windowHeight / 2 - 30);
+        for (char c : restartText) {
+            glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, c);
+        }
+    }
+    
     // Re-enable lighting and depth test
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_LIGHTING);
@@ -2108,6 +2846,10 @@ void display() {
 }
 
 void reshape(int w, int h) {
+    // Prevent division by zero
+    if (h == 0) h = 1;
+    if (w == 0) w = 1;
+    
     windowWidth = w;
     windowHeight = h;
     
@@ -2116,6 +2858,9 @@ void reshape(int w, int h) {
     glLoadIdentity();
     gluPerspective(60.0f, (float)w / (float)h, 0.1f, 100.0f);
     glMatrixMode(GL_MODELVIEW);
+    
+    // Hide cursor - use crosshair instead
+    glutSetCursor(GLUT_CURSOR_NONE);
 }
 
 void keyboard(unsigned char key, int x, int y) {
@@ -2147,6 +2892,41 @@ void keyboard(unsigned char key, int x, int y) {
         case 27: // ESC key
             cleanupScenes();
             exit(0);
+            break;
+        case 'f':
+        case 'F':
+            // Toggle fullscreen
+            {
+                static bool isFullscreen = false;
+                static int savedX = 100, savedY = 100, savedW = 1024, savedH = 768;
+                if (!isFullscreen) {
+                    savedX = glutGet(GLUT_WINDOW_X);
+                    savedY = glutGet(GLUT_WINDOW_Y);
+                    savedW = windowWidth;
+                    savedH = windowHeight;
+                    glutFullScreen();
+                    isFullscreen = true;
+                } else {
+                    glutReshapeWindow(savedW, savedH);
+                    glutPositionWindow(savedX, savedY);
+                    isFullscreen = false;
+                }
+                glutSetCursor(GLUT_CURSOR_NONE);  // Keep cursor hidden
+            }
+            break;
+        case 'r':
+        case 'R':
+            // Restart game (reset lives and position)
+            if (lives <= 0) {
+                lives = 5;
+                player.position = Vector3(0.0f, 0.0f, 5.0f);
+                player.yaw = 0.0f;
+                player.pitch = 0.0f;
+                trapDamageCooldown = 0.0f;
+                hasKey = false;
+                chestOpened = false;
+                std::cout << "Game restarted!" << std::endl;
+            }
             break;
         case 'w':
         case 'W':
@@ -2209,6 +2989,50 @@ void specialKeys(int key, int x, int y) {
     glutPostRedisplay();
 }
 
+void mouseClick(int button, int state, int x, int y) {
+    // Only handle left click when pressed (not released)
+    if (button != GLUT_LEFT_BUTTON || state != GLUT_DOWN) return;
+    
+    // Only check for chest interaction in Scene 1
+    if (currentScene != 1) return;
+    
+    // Check if chest is already opened
+    if (chestOpened) return;
+    
+    // Check if player is close enough to the chest
+    float dx = player.position.x - chestPosition.x;
+    float dz = player.position.z - chestPosition.z;
+    float distToChest = sqrt(dx*dx + dz*dz);
+    
+    // Must be within 4 units of the chest
+    if (distToChest > 4.0f) return;
+    
+    // Check if player is looking at the chest (simple angle check)
+    float radYaw = player.yaw * M_PI / 180.0f;
+    float lookX = sin(radYaw);
+    float lookZ = -cos(radYaw);
+    
+    // Direction to chest
+    float toChestX = chestPosition.x - player.position.x;
+    float toChestZ = chestPosition.z - player.position.z;
+    float toChestLen = sqrt(toChestX*toChestX + toChestZ*toChestZ);
+    if (toChestLen > 0) {
+        toChestX /= toChestLen;
+        toChestZ /= toChestLen;
+    }
+    
+    // Dot product to check if looking roughly at chest
+    float dot = lookX * toChestX + lookZ * toChestZ;
+    
+    // If dot product > 0.7, player is looking at the chest (within ~45 degrees)
+    if (dot > 0.7f) {
+        chestOpened = true;
+        hasKey = true;
+        score += 100;
+        std::cout << "*** CHEST OPENED! You found a KEY! ***" << std::endl;
+    }
+}
+
 void mouseMotion(int x, int y) {
     if (!mouseInitialized) {
         lastMouseX = x;
@@ -2240,6 +3064,11 @@ void timer(int value) {
     // Update animation time
     animationTime += 0.016f; // Approximately 60 FPS
     
+    // Update trap damage cooldown
+    if (trapDamageCooldown > 0) {
+        trapDamageCooldown -= 0.016f;
+    }
+    
     // Handle continuous movement based on key states
     float moveSpeed = 0.15f; // Slightly reduced for smoother frame-by-frame movement
     float forward = 0.0f;
@@ -2261,6 +3090,21 @@ void timer(int value) {
             right *= moveSpeed;
         }
         player.move(forward, right);
+    }
+    
+    // Check for trap damage in Scene 2 (traps don't block, but damage on contact)
+    if (currentScene == 2 && trapDamageCooldown <= 0) {
+        if (scene2Instance) {
+            if (scene2Instance->checkTrapCollision(player.position.x, player.position.z, 0.3f)) {
+                lives--;
+                trapDamageCooldown = 1.5f;  // 1.5 second cooldown before taking damage again
+                std::cout << "OUCH! Trap damage! Lives remaining: " << lives << std::endl;
+                if (lives <= 0) {
+                    std::cout << "GAME OVER! You ran out of lives!" << std::endl;
+                    lives = 0;  // Clamp to 0
+                }
+            }
+        }
     }
     
     // Update current scene
@@ -2331,8 +3175,10 @@ int main(int argc, char** argv) {
     std::cout << "  3 - Scene 2 (Cave)" << std::endl;
     std::cout << "  4 - Scene 1 (Forest)" << std::endl;
     std::cout << "  T - Toggle View" << std::endl;
+    std::cout << "  F - Toggle Fullscreen" << std::endl;
     std::cout << "  WASD - Move" << std::endl;
     std::cout << "  Mouse - Look around" << std::endl;
+    std::cout << "  Left Click - Interact (chest)" << std::endl;
     std::cout << "  ESC - Exit" << std::endl;
     std::cout << std::endl;
     
@@ -2342,6 +3188,9 @@ int main(int argc, char** argv) {
     glutInitWindowSize(windowWidth, windowHeight);
     glutInitWindowPosition(100, 100);
     glutCreateWindow("Crystal Caves - OpenGL Graphics Project");
+    
+    // Hide the mouse cursor - use crosshair instead
+    glutSetCursor(GLUT_CURSOR_NONE);
     
     // Initialize OpenGL settings
     initOpenGL();
@@ -2355,6 +3204,7 @@ int main(int argc, char** argv) {
     glutKeyboardFunc(keyboard);
     glutKeyboardUpFunc(keyboardUp);
     glutSpecialFunc(specialKeys);
+    glutMouseFunc(mouseClick);  // Mouse click for chest interaction
     glutMotionFunc(mouseMotion);
     glutPassiveMotionFunc(mousePassiveMotion);
     glutTimerFunc(0, timer, 0);
