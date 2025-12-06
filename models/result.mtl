@@ -1,0 +1,31 @@
+# Material for Creeper model
+# Creeper green color with texture
+
+newmtl Creeper_Mat
+Ka 0.2 0.4 0.2
+Kd 0.4 0.65 0.4
+Ks 0.1 0.1 0.1
+Ns 10.0
+d 1.0
+illum 2
+map_Kd creeper.png
+
+# Material for Cow Minecraft
+newmtl Cow_Mat
+Ka 0.3 0.3 0.3
+Kd 0.8 0.8 0.8
+Ks 0.1 0.1 0.1
+Ns 10.0
+d 1.0
+illum 2
+map_Kd Cow Minecraft.jpg
+
+# Material for Wolf Minecraft
+newmtl Wolf_Mat
+Ka 0.3 0.3 0.3
+Kd 0.8 0.8 0.8
+Ks 0.1 0.1 0.1
+Ns 10.0
+d 1.0
+illum 2
+map_Kd HD_wolf.png
