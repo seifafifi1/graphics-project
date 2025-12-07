@@ -26,6 +26,16 @@
 #include <sstream>
 #include <map>
 #include <algorithm>
+#include <thread>
+#include <chrono>
+#include <mutex>
+
+// Windows multimedia for sound
+#ifdef _WIN32
+#include <windows.h>
+#include <mmsystem.h>
+#pragma comment(lib, "winmm.lib")
+#endif
 
 // STB Image for texture loading
 #define STB_IMAGE_IMPLEMENTATION
@@ -63,6 +73,171 @@ GLuint loadTexture(const std::string& filename) {
     stbi_image_free(data);
     
     return textureID;
+}
+
+// ============================================================================
+// BACKGROUND MUSIC VARIABLES
+// ============================================================================
+
+bool backgroundMusicPlaying = false;  // Track if background music is playing
+std::string currentBackgroundMusic = "";  // Current background music file
+std::mutex musicMutex;  // Mutex to ensure only one music plays at a time
+
+// ============================================================================
+// SOUND FUNCTION
+// ============================================================================
+
+void playDamageSound() {
+#ifdef _WIN32
+    // Play obstacle.wav asynchronously (non-blocking)
+    PlaySound(TEXT("obstacle.wav"), NULL, SND_FILENAME | SND_ASYNC);
+#endif
+}
+
+void playKeySound() {
+#ifdef _WIN32
+    // Play keys.wav asynchronously (non-blocking)
+    PlaySound(TEXT("keys.wav"), NULL, SND_FILENAME | SND_ASYNC);
+#endif
+}
+
+void playExplosionSound() {
+#ifdef _WIN32
+    // Play explosion.wav asynchronously (non-blocking)
+    PlaySound(TEXT("explosion.wav"), NULL, SND_FILENAME | SND_ASYNC);
+#endif
+}
+
+void playCrystalSound() {
+#ifdef _WIN32
+    // Play crystal.wav asynchronously (non-blocking)
+    PlaySound(TEXT("crystal.wav"), NULL, SND_FILENAME | SND_ASYNC);
+#endif
+}
+
+void playGameWinSound() {
+#ifdef _WIN32
+    // Play game win.wav asynchronously (non-blocking)
+    PlaySound(TEXT("game win.wav"), NULL, SND_FILENAME | SND_ASYNC);
+#endif
+}
+
+void playGameOverSound() {
+#ifdef _WIN32
+    // Play game over.wav asynchronously (non-blocking)
+    PlaySound(TEXT("game over.wav"), NULL, SND_FILENAME | SND_ASYNC);
+#endif
+}
+
+void playJumpSound() {
+#ifdef _WIN32
+    // Play jump.wav asynchronously (non-blocking)
+    PlaySound(TEXT("jump.wav"), NULL, SND_FILENAME | SND_ASYNC);
+#endif
+}
+
+// Forward declaration
+void stopBackgroundMusic();
+
+void playBackgroundMusic(const char* filename) {
+#ifdef _WIN32
+    std::lock_guard<std::mutex> lock(musicMutex);
+    
+    // Stop any current background music completely
+    backgroundMusicPlaying = false;
+    currentBackgroundMusic = "";
+    
+    // Force close all MCI devices that might be playing
+    mciSendString("close all", NULL, 0, NULL);
+    
+    // Give it a moment to stop completely
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    
+    // Store the new filename
+    currentBackgroundMusic = filename;
+    backgroundMusicPlaying = true;
+    
+    std::cout << "Starting background music: " << filename << std::endl;
+    
+    // Create a thread to handle looping background music
+    std::thread([filename]() {  // Capture filename by value
+        std::string localFilename = filename;
+        std::string musicAlias = "bgm";  // Use simple fixed alias
+        
+        while (backgroundMusicPlaying && currentBackgroundMusic == localFilename) {
+            char errorMsg[256];
+            char returnString[128];
+            MCIERROR error;
+            
+            // Force close any existing bgm
+            mciSendString("close bgm", NULL, 0, NULL);
+            
+            // Open the file
+            std::string command = "open \"" + localFilename + "\" type waveaudio alias bgm";
+            error = mciSendString(command.c_str(), NULL, 0, NULL);
+            if (error != 0) {
+                mciGetErrorString(error, errorMsg, 256);
+                std::cout << "Error opening background music: " << errorMsg << std::endl;
+                break;
+            }
+            
+            // Play the music (non-blocking)
+            error = mciSendString("play bgm", NULL, 0, NULL);
+            if (error != 0) {
+                mciGetErrorString(error, errorMsg, 256);
+                std::cout << "Error playing background music: " << errorMsg << std::endl;
+                mciSendString("close bgm", NULL, 0, NULL);
+                break;
+            }
+            
+            // Wait for the music to finish playing, checking status every 100ms
+            while (backgroundMusicPlaying && currentBackgroundMusic == localFilename) {
+                mciSendString("status bgm mode", returnString, sizeof(returnString), NULL);
+                if (strcmp(returnString, "stopped") == 0 || strcmp(returnString, "") == 0) {
+                    break;  // Song finished, loop to play again
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            
+            // Close after playing
+            mciSendString("close bgm", NULL, 0, NULL);
+        }
+    }).detach();
+#endif
+}
+
+void stopBackgroundMusic() {
+#ifdef _WIN32
+    backgroundMusicPlaying = false;
+    currentBackgroundMusic = "";
+    // Force close all MCI devices
+    mciSendString("close all", NULL, 0, NULL);
+    std::cout << "Stopped background music" << std::endl;
+#endif
+}
+
+void playExplosionThenDamageSound() {
+#ifdef _WIN32
+    // Create a thread to play sounds sequentially without blocking the game
+    std::thread([]() {
+        // Play explosion sound and wait for it to finish
+        PlaySound(TEXT("explosion.wav"), NULL, SND_FILENAME | SND_SYNC);
+        // Then play damage sound
+        PlaySound(TEXT("obstacle.wav"), NULL, SND_FILENAME | SND_ASYNC);
+    }).detach();
+#endif
+}
+
+void playExplosionThenGameOverSound() {
+#ifdef _WIN32
+    // Create a thread to play sounds sequentially without blocking the game
+    std::thread([]() {
+        // Play explosion sound and wait for it to finish
+        PlaySound(TEXT("explosion.wav"), NULL, SND_FILENAME | SND_SYNC);
+        // Then play game over sound
+        PlaySound(TEXT("game over.wav"), NULL, SND_FILENAME | SND_ASYNC);
+    }).detach();
+#endif
 }
 
 // ============================================================================
@@ -1137,14 +1312,21 @@ public:
     float playerHeight;   // Player height for camera
     float groundLevel;    // Current ground level (can be negative for lava pits)
     
+    // Animation variables
+    float walkAnimation;  // Walking animation timer
+    bool isMoving;        // Is player currently moving
+    float bodyYaw;        // Character body rotation (separate from camera yaw)
+    
     Player() : position(0.0f, 0.0f, 5.0f), yaw(0.0f), pitch(0.0f), isFirstPerson(false), radius(0.3f),
-               velocityY(0.0f), isJumping(false), isOnGround(true), playerHeight(1.7f), groundLevel(0.0f) {}
+               velocityY(0.0f), isJumping(false), isOnGround(true), playerHeight(1.7f), groundLevel(0.0f),
+               walkAnimation(0.0f), isMoving(false), bodyYaw(180.0f) {}
     
     void jump() {
         if (isOnGround && !isJumping) {
             velocityY = 6.0f;  // Jump strength
             isJumping = true;
             isOnGround = false;
+            playJumpSound();  // Play jump sound effect
         }
     }
     
@@ -1213,23 +1395,111 @@ public:
         
         glPushMatrix();
         glTranslatef(position.x, position.y, position.z);
-        glRotatef(yaw, 0.0f, 1.0f, 0.0f);
+        // Character body uses bodyYaw (updated only when moving forward)
+        // Character faces the direction of movement, camera sees the back
+        glRotatef(bodyYaw, 0.0f, 1.0f, 0.0f);
         
-        // Draw simple player model (capsule/cylinder)
-        // Body
-        glColor3f(0.2f, 0.2f, 0.8f); // Blue player
-        glPushMatrix();
-        glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
-        GLUquadric* quad = gluNewQuadric();
-        gluCylinder(quad, 0.3f, 0.3f, 1.5f, 16, 4);
-        gluDeleteQuadric(quad);
-        glPopMatrix();
+        // Minecraft-style blocky character with animations
         
-        // Head
+        // Calculate animation angles
+        float legSwing = 0.0f;
+        float armSwing = 0.0f;
+        float bodyBounce = 0.0f;
+        
+        if (isMoving) {
+            // Walking animation - swing legs and arms back and forth
+            legSwing = sin(walkAnimation * 5.0f) * 30.0f; // Swing legs ±30 degrees
+            armSwing = sin(walkAnimation * 5.0f) * 25.0f; // Swing arms ±25 degrees
+            bodyBounce = abs(sin(walkAnimation * 10.0f)) * 0.05f; // Slight bounce
+        }
+        
+        float jumpSquash = 0.0f;
+        if (isJumping && !isOnGround) {
+            // Jump animation - stretch body slightly when in air
+            jumpSquash = 0.1f;
+        }
+        
+        // Head (cube) - bobs when walking and tilts with camera pitch
         glColor3f(0.8f, 0.6f, 0.5f); // Skin tone
         glPushMatrix();
-        glTranslatef(0.0f, 1.7f, 0.0f);
-        glutSolidSphere(0.25f, 16, 16);
+        glTranslatef(0.0f, 1.5f + bodyBounce + jumpSquash * 0.5f, 0.0f);
+        glRotatef(-pitch, 1.0f, 0.0f, 0.0f); // Head tilts up/down with camera pitch
+        glScalef(0.5f, 0.5f, 0.5f);
+        glutSolidCube(1.0f);
+        
+        // Draw face on the front of the head
+        glDisable(GL_LIGHTING); // Disable lighting for face features
+        
+        // Left Eye (on front side, z = 0.51)
+        glColor3f(0.0f, 0.0f, 0.0f); // Black
+        glPushMatrix();
+        glTranslatef(-0.2f, 0.15f, 0.51f); // Left side of face
+        glScalef(0.15f, 0.2f, 0.05f);
+        glutSolidCube(1.0f);
+        glPopMatrix();
+        
+        // Right Eye (on front side)
+        glPushMatrix();
+        glTranslatef(0.2f, 0.15f, 0.51f); // Right side of face
+        glScalef(0.15f, 0.2f, 0.05f);
+        glutSolidCube(1.0f);
+        glPopMatrix();
+        
+        // Mouth (simple rectangle on front side)
+        glPushMatrix();
+        glTranslatef(0.0f, -0.2f, 0.51f); // Center, below eyes, front of head
+        glScalef(0.4f, 0.1f, 0.05f);
+        glutSolidCube(1.0f);
+        glPopMatrix();
+        
+        glEnable(GL_LIGHTING); // Re-enable lighting
+        
+        glPopMatrix();
+        
+        // Body (cube) - bounces when walking, stretches when jumping
+        glColor3f(0.2f, 0.2f, 0.8f); // Blue shirt
+        glPushMatrix();
+        glTranslatef(0.0f, 0.9f + bodyBounce, 0.0f);
+        glScalef(0.5f, 0.75f + jumpSquash, 0.25f);
+        glutSolidCube(1.0f);
+        glPopMatrix();
+        
+        // Left Arm - swings when walking
+        glColor3f(0.2f, 0.2f, 0.8f); // Blue shirt (same as body)
+        glPushMatrix();
+        glTranslatef(-0.375f, 1.15f + bodyBounce, 0.0f); // Move to shoulder
+        glRotatef(-armSwing, 1.0f, 0.0f, 0.0f); // Rotate from shoulder
+        glTranslatef(0.0f, -0.25f, 0.0f); // Offset to center of arm
+        glScalef(0.25f, 0.75f, 0.25f);
+        glutSolidCube(1.0f);
+        glPopMatrix();
+        
+        // Right Arm - swings opposite to left arm
+        glPushMatrix();
+        glTranslatef(0.375f, 1.15f + bodyBounce, 0.0f); // Move to shoulder
+        glRotatef(armSwing, 1.0f, 0.0f, 0.0f); // Rotate from shoulder (opposite direction)
+        glTranslatef(0.0f, -0.25f, 0.0f); // Offset to center of arm
+        glScalef(0.25f, 0.75f, 0.25f);
+        glutSolidCube(1.0f);
+        glPopMatrix();
+        
+        // Left Leg - swings when walking
+        glColor3f(0.1f, 0.1f, 0.4f); // Dark blue pants
+        glPushMatrix();
+        glTranslatef(-0.125f, 0.6f + bodyBounce, 0.0f); // Move to hip
+        glRotatef(legSwing, 1.0f, 0.0f, 0.0f); // Rotate from hip
+        glTranslatef(0.0f, -0.3f, 0.0f); // Offset to center of leg
+        glScalef(0.25f, 0.6f, 0.25f);
+        glutSolidCube(1.0f);
+        glPopMatrix();
+        
+        // Right Leg - swings opposite to left leg
+        glPushMatrix();
+        glTranslatef(0.125f, 0.6f + bodyBounce, 0.0f); // Move to hip
+        glRotatef(-legSwing, 1.0f, 0.0f, 0.0f); // Rotate from hip (opposite direction)
+        glTranslatef(0.0f, -0.3f, 0.0f); // Offset to center of leg
+        glScalef(0.25f, 0.6f, 0.25f);
+        glutSolidCube(1.0f);
         glPopMatrix();
         
         glPopMatrix();
@@ -1291,6 +1561,8 @@ Vector3 portalPositionScene2(0.0f, 0.0f, -45.0f);  // Portal location in Scene 2
 // Crystal collection state
 int crystalsCollected = 0;  // Number of purple crystals collected (need 10 to win)
 bool gameWon = false;  // Whether player has won the game
+bool gameWonSoundPlayed = false;  // Track if win sound has been played
+bool gameOverSoundPlayed = false;  // Track if game over sound has been played
 
 // Sparkle effect for crystal collection
 struct Sparkle {
@@ -2762,7 +3034,16 @@ private:
                         creeper.alive = false;
                         lives -= 4.0f;  // Lose 4 lives
                         if (lives < 0) lives = 0;
-                        std::cout << "CREEPER " << (i+1) << " EXPLOSION! Lost 4 lives. Remaining: " << lives << std::endl;
+                        
+                        // Check if player died and play appropriate sound
+                        if (lives <= 0 && !gameOverSoundPlayed) {
+                            playExplosionThenGameOverSound();  // Play explosion then game over sound
+                            gameOverSoundPlayed = true;
+                            std::cout << "CREEPER " << (i+1) << " EXPLOSION! GAME OVER!" << std::endl;
+                        } else {
+                            playExplosionThenDamageSound();  // Play explosion then damage sound
+                            std::cout << "CREEPER " << (i+1) << " EXPLOSION! Lost 4 lives. Remaining: " << lives << std::endl;
+                        }
                     }
                 } else {
                     // Reset fuse if player moves away
@@ -3930,6 +4211,9 @@ void initScenes() {
     currentScenePtr = scene1;
     currentScene = 1;
     sceneCollisionCheck = scene1CollisionCheck;  // Set collision check for scene 1
+    
+    // Start background music for Scene 1
+    playBackgroundMusic("nature.wav");
 }
 
 void switchScene(int sceneNumber) {
@@ -3941,10 +4225,12 @@ void switchScene(int sceneNumber) {
         currentScenePtr = scene1;
         currentScene = 1;
         sceneCollisionCheck = scene1CollisionCheck;
+        playBackgroundMusic("nature.wav");  // Play nature background music for Scene 1
     } else if (sceneNumber == 2) {
         currentScenePtr = scene2;
         currentScene = 2;
         sceneCollisionCheck = scene2CollisionCheck;  // Collision with stones, traps, walls
+        playBackgroundMusic("lava.wav");  // Play lava background music for Scene 2
     }
 }
 
@@ -4427,6 +4713,8 @@ void keyboard(unsigned char key, int x, int y) {
                 portalOpened = false;
                 crystalsCollected = 0;
                 gameWon = false;
+                gameWonSoundPlayed = false;  // Reset win sound flag
+                gameOverSoundPlayed = false;  // Reset game over sound flag
                 sparkles.clear(); // Clear all sparkle particles
                 flames.clear(); // Clear all flame particles
                 isPlayerBurning = false; // Reset burning state
@@ -4543,6 +4831,7 @@ void mouseClick(int button, int state, int x, int y) {
                 chestOpened = true;
                 hasKey = true;
                 score += 100;
+                playKeySound();  // Play key collection sound
                 std::cout << "*** CHEST OPENED! You found a KEY! ***" << std::endl;
                 return;  // Exit after chest interaction
             }
@@ -4597,6 +4886,18 @@ void mouseMotion(int x, int y) {
     // Update last mouse position
     lastMouseX = x;
     lastMouseY = y;
+    
+    // Wrap mouse horizontally for infinite 360 rotation
+    int margin = 10; // Pixels from edge to trigger wrap
+    if (x <= margin) {
+        // Mouse at left edge, warp to right side
+        lastMouseX = windowWidth - margin - 1;
+        glutWarpPointer(lastMouseX, y);
+    } else if (x >= windowWidth - margin) {
+        // Mouse at right edge, warp to left side
+        lastMouseX = margin + 1;
+        glutWarpPointer(lastMouseX, y);
+    }
     
     glutPostRedisplay();
 }
@@ -4686,6 +4987,36 @@ void timer(int value) {
     if (keyD) right += moveSpeed;
     if (keyA) right -= moveSpeed;
     
+    // Check if player is moving and update animation
+    if (forward != 0.0f || right != 0.0f) {
+        player.isMoving = true;
+        player.walkAnimation += deltaTime;
+        
+        // Update body rotation ONLY when moving forward (W key pressed)
+        // Smooth rotation using lerp
+        if (keyW) {
+            float rotationSpeed = 10.0f; // How fast to rotate (higher = faster)
+            
+            // Calculate the shortest rotation direction
+            // Add 180 so character faces forward (back to camera)
+            float targetYaw = player.yaw + 180.0f;
+            float diff = targetYaw - player.bodyYaw;
+            
+            // Normalize the difference to be between -180 and 180
+            while (diff > 180.0f) diff -= 360.0f;
+            while (diff < -180.0f) diff += 360.0f;
+            
+            // Smoothly interpolate towards target
+            player.bodyYaw += diff * rotationSpeed * deltaTime;
+            
+            // Keep bodyYaw in reasonable range
+            while (player.bodyYaw > 360.0f) player.bodyYaw -= 360.0f;
+            while (player.bodyYaw < 0.0f) player.bodyYaw += 360.0f;
+        }
+    } else {
+        player.isMoving = false;
+    }
+    
     // Apply movement if any keys are pressed
     if (forward != 0.0f || right != 0.0f) {
         // Normalize diagonal movement to prevent faster movement when moving diagonally
@@ -4736,10 +5067,15 @@ void timer(int value) {
                 lives -= 0.5f;
                 scene2Instance->lavaDamageTimer = 0.0f;
                 trapDamageCooldown = 1.5f;  // Trigger damage flash
+                playDamageSound();  // Play damage sound
                 std::cout << "BURNING! Lava damage! Lives remaining: " << lives << std::endl;
                 if (lives <= 0) {
                     std::cout << "GAME OVER! You burned in lava!" << std::endl;
                     lives = 0;
+                    if (!gameOverSoundPlayed) {
+                        playGameOverSound();  // Play game over sound
+                        gameOverSoundPlayed = true;
+                    }
                 }
             }
         } else {
@@ -4755,10 +5091,15 @@ void timer(int value) {
             if (scene2Instance->checkTrapCollision(player.position.x, player.position.z, 0.3f)) {
                 lives -= 1.0f;
                 trapDamageCooldown = 1.5f;  // 1.5 second cooldown before taking damage again
+                playDamageSound();  // Play damage sound
                 std::cout << "OUCH! Trap damage! Lives remaining: " << lives << std::endl;
                 if (lives <= 0) {
                     std::cout << "GAME OVER! You ran out of lives!" << std::endl;
                     lives = 0.0f;  // Clamp to 0
+                    if (!gameOverSoundPlayed) {
+                        playGameOverSound();  // Play game over sound
+                        gameOverSoundPlayed = true;
+                    }
                 }
             }
         }
@@ -4775,6 +5116,7 @@ void timer(int value) {
                     crystal.collected = true;
                     crystalsCollected++;
                     score += 50;
+                    playCrystalSound();  // Play crystal collection sound
                     std::cout << "*** CRYSTAL COLLECTED! (" << crystalsCollected << "/10) ***" << std::endl;
                     
                     // Create sparkle effect
@@ -4789,6 +5131,10 @@ void timer(int value) {
                     
                     if (crystalsCollected >= 10) {
                         gameWon = true;
+                        if (!gameWonSoundPlayed) {
+                            playGameWinSound();  // Play game win sound
+                            gameWonSoundPlayed = true;
+                        }
                         std::cout << "\\n\\n*** YOU WIN! ALL CRYSTALS COLLECTED! ***\\n\\n" << std::endl;
                     }
                 }
