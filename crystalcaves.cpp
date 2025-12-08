@@ -1416,47 +1416,47 @@ void drawColoredCube() {
 // Draw a textured cube for Steve's head (with UV coordinates)
 void drawTexturedCube() {
     glBegin(GL_QUADS);
-    // Front face (+Z)
+    // Front face (+Z) - Flipped vertically
     glNormal3f(0.0f, 0.0f, 1.0f);
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, -0.5f, 0.5f);
-    glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, -0.5f, 0.5f);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, 0.5f, 0.5f);
-    glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, 0.5f, 0.5f);
-    
-    // Back face (-Z)
-    glNormal3f(0.0f, 0.0f, -1.0f);
-    glTexCoord2f(1.0f, 0.0f); glVertex3f(-0.5f, -0.5f, -0.5f);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(-0.5f, 0.5f, -0.5f);
-    glTexCoord2f(0.0f, 1.0f); glVertex3f(0.5f, 0.5f, -0.5f);
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(0.5f, -0.5f, -0.5f);
-    
-    // Top face (+Y)
-    glNormal3f(0.0f, 1.0f, 0.0f);
-    glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, 0.5f, -0.5f);
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, 0.5f, 0.5f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, -0.5f, 0.5f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, -0.5f, 0.5f);
     glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, 0.5f, 0.5f);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, 0.5f, -0.5f);
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, 0.5f, 0.5f);
     
-    // Bottom face (-Y)
-    glNormal3f(0.0f, -1.0f, 0.0f);
+    // Back face (-Z) - Flipped vertically
+    glNormal3f(0.0f, 0.0f, -1.0f);
     glTexCoord2f(1.0f, 1.0f); glVertex3f(-0.5f, -0.5f, -0.5f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(-0.5f, 0.5f, -0.5f);
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(0.5f, 0.5f, -0.5f);
     glTexCoord2f(0.0f, 1.0f); glVertex3f(0.5f, -0.5f, -0.5f);
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(0.5f, -0.5f, 0.5f);
-    glTexCoord2f(1.0f, 0.0f); glVertex3f(-0.5f, -0.5f, 0.5f);
     
-    // Right face (+X)
+    // Top face (+Y) - Flipped vertically
+    glNormal3f(0.0f, 1.0f, 0.0f);
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, 0.5f, -0.5f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, 0.5f, 0.5f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, 0.5f, 0.5f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, 0.5f, -0.5f);
+    
+    // Bottom face (-Y) - Flipped vertically
+    glNormal3f(0.0f, -1.0f, 0.0f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(-0.5f, -0.5f, -0.5f);
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(0.5f, -0.5f, -0.5f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(0.5f, -0.5f, 0.5f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(-0.5f, -0.5f, 0.5f);
+    
+    // Right face (+X) - Flipped vertically
     glNormal3f(1.0f, 0.0f, 0.0f);
-    glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, -0.5f, -0.5f);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, 0.5f, -0.5f);
-    glTexCoord2f(0.0f, 1.0f); glVertex3f(0.5f, 0.5f, 0.5f);
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(0.5f, -0.5f, 0.5f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, -0.5f, -0.5f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, 0.5f, -0.5f);
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(0.5f, 0.5f, 0.5f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(0.5f, -0.5f, 0.5f);
     
-    // Left face (-X)
+    // Left face (-X) - Flipped vertically
     glNormal3f(-1.0f, 0.0f, 0.0f);
-    glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, -0.5f, -0.5f);
-    glTexCoord2f(1.0f, 0.0f); glVertex3f(-0.5f, -0.5f, 0.5f);
-    glTexCoord2f(1.0f, 1.0f); glVertex3f(-0.5f, 0.5f, 0.5f);
-    glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, 0.5f, -0.5f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, -0.5f, -0.5f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(-0.5f, -0.5f, 0.5f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(-0.5f, 0.5f, 0.5f);
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, 0.5f, -0.5f);
     glEnd();
 }
 
@@ -1916,6 +1916,10 @@ private:
     };
     std::vector<Flower> flowers;
     
+    // Sun animation variables
+    float sunTime;          // Time variable for sun movement
+    float sunX, sunY, sunZ; // Sun position
+    
 public:
     Scene1_CaveEntrance() : Scene("Enchanted Forest"), 
                             caveModel(nullptr), entranceRocksModel(nullptr), 
@@ -1931,7 +1935,8 @@ public:
                             creeperDetectRadius(15.0f), creeperExplodeRadius(2.0f),
                             flockPosition(0.0f, 15.0f, 0.0f), flockRotation(0.0f), flockTime(0.0f),
                             pigPosition(0.0f, 0.0f, -5.0f), pigRotation(0.0f),
-                            pigWanderTime(0.0f), pigTargetPosition(0.0f, 0.0f, -5.0f), pigMoveSpeed(0.02f) {
+                            pigWanderTime(0.0f), pigTargetPosition(0.0f, 0.0f, -5.0f), pigMoveSpeed(0.02f),
+                            sunTime(0.0f), sunX(50.0f), sunY(40.0f), sunZ(0.0f) {
         // Initialize 4 creepers at different positions
         creepers[0] = {Vector3(15.0f, 0.0f, -10.0f), 0.0f, 0.0f, Vector3(15.0f, 0.0f, -10.0f), true, false, 0.0f, false, 0.0f, Vector3(0.0f, 0.0f, 0.0f)};
         creepers[1] = {Vector3(-20.0f, 0.0f, 15.0f), 0.0f, 0.0f, Vector3(-20.0f, 0.0f, 15.0f), true, false, 0.0f, false, 0.0f, Vector3(0.0f, 0.0f, 0.0f)};
@@ -2087,13 +2092,34 @@ public:
     }
     
     void render() override {
-        // Set scene-specific lighting for forest
-        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, ambientLight);
+        // Calculate time of day based on sun position
+        // sunY ranges from 100 (horizon) to 180 (noon peak)
+        float timeOfDay = (sunY - 100.0f) / 80.0f;  // 0.0 = sunrise/sunset, 1.0 = noon
+        timeOfDay = std::max(0.0f, std::min(1.0f, timeOfDay)); // Clamp between 0 and 1
         
-        // Setup sunlight - positioned at the sun's location (30, 35, -80)
-        GLfloat lightPos[] = { 30.0f, 35.0f, -80.0f, 1.0f }; // Sun position
-        GLfloat lightDiffuse[] = { 1.0f, 1.0f, 0.95f, 1.0f };  // Bright white sunlight
-        GLfloat lightSpecular[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        // Adjust ambient light based on time of day
+        // Dimmer at sunrise/sunset, brighter at noon
+        float ambientStrength = 0.25f + 0.5f * timeOfDay;  // 0.25 to 0.75
+        GLfloat dynamicAmbient[] = { 
+            ambientStrength * (0.9f - 0.1f * (1.0f - timeOfDay)),  // More orange at low sun
+            ambientStrength * (0.85f + 0.1f * timeOfDay),          // Balanced green
+            ambientStrength * (0.75f + 0.25f * timeOfDay),         // More blue at high sun
+            1.0f 
+        };
+        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, dynamicAmbient);
+        
+        // Setup sunlight - positioned at the sun's current location
+        GLfloat lightPos[] = { sunX, sunY, sunZ, 1.0f }; // Dynamic sun position
+        
+        // Sun color changes based on position (orange at sunrise/sunset, white at noon)
+        float sunIntensity = 0.6f + 0.4f * timeOfDay;  // 0.6 to 1.0
+        GLfloat lightDiffuse[] = { 
+            1.0f,                               // Red (constant at full)
+            0.75f + 0.25f * timeOfDay,          // Green (0.75 to 1.0 - orange to white)
+            0.6f + 0.4f * timeOfDay,            // Blue (0.6 to 1.0 - orange to white)
+            1.0f 
+        };
+        GLfloat lightSpecular[] = { sunIntensity, sunIntensity, sunIntensity, 1.0f };
         
         glLightfv(GL_LIGHT0, GL_POSITION, lightPos);
         glLightfv(GL_LIGHT0, GL_DIFFUSE, lightDiffuse);
@@ -2377,6 +2403,15 @@ public:
     void update(float deltaTime) override {
         // Update portal animation
         portalTime += deltaTime;
+        
+        // Update sun position - moves from right to left
+        sunTime += deltaTime * 0.5f; // Speed of sun movement (0.5 = faster, visible movement)
+        
+        // Sun moves in an arc from right (east) to left (west)
+        // Complete cycle takes about 12.5 seconds (2*PI / 0.5)
+        sunX = 50.0f * cos(sunTime);  // X position: 50 to -50
+        sunY = 100.0f + 80.0f * abs(sin(sunTime));  // Y position: 100 to 180 (much higher in sky)
+        sunZ = 0.0f;  // Z stays constant
         
         // Update pig AI - wander randomly
         updatePigAI(deltaTime);
@@ -2941,28 +2976,28 @@ private:
         
         glDisable(GL_TEXTURE_2D);
         
-        // Draw sun on the back wall (-Z direction, slightly in front of the wall)
+        // Draw sun on the skybox (using dynamic position)
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         
-        // Sun glow
+        // Sun glow (halo effect)
         glColor4f(1.0f, 0.9f, 0.6f, 0.6f);
         float glow = 50.0f;
         glBegin(GL_QUADS);
-        glVertex3f(80.0f - glow, 150.0f - glow, -s + 1.0f);
-        glVertex3f(80.0f + glow, 150.0f - glow, -s + 1.0f);
-        glVertex3f(80.0f + glow, 150.0f + glow, -s + 1.0f);
-        glVertex3f(80.0f - glow, 150.0f + glow, -s + 1.0f);
+        glVertex3f(sunX - glow, sunY - glow, -s + 1.0f);
+        glVertex3f(sunX + glow, sunY - glow, -s + 1.0f);
+        glVertex3f(sunX + glow, sunY + glow, -s + 1.0f);
+        glVertex3f(sunX - glow, sunY + glow, -s + 1.0f);
         glEnd();
         
-        // Sun core (bright yellow-white)
+        // Sun core (bright yellow-white square)
         glColor3f(1.0f, 1.0f, 0.85f);
         float sun = 25.0f;
         glBegin(GL_QUADS);
-        glVertex3f(80.0f - sun, 150.0f - sun, -s + 2.0f);
-        glVertex3f(80.0f + sun, 150.0f - sun, -s + 2.0f);
-        glVertex3f(80.0f + sun, 150.0f + sun, -s + 2.0f);
-        glVertex3f(80.0f - sun, 150.0f + sun, -s + 2.0f);
+        glVertex3f(sunX - sun, sunY - sun, -s + 2.0f);
+        glVertex3f(sunX + sun, sunY - sun, -s + 2.0f);
+        glVertex3f(sunX + sun, sunY + sun, -s + 2.0f);
+        glVertex3f(sunX - sun, sunY + sun, -s + 2.0f);
         glEnd();
         
         glDisable(GL_BLEND);
@@ -5367,27 +5402,27 @@ void timer(int value) {
         player.isMoving = true;
         player.walkAnimation += deltaTime;
         
-        // Update body rotation ONLY when moving forward (W key pressed)
-        // Smooth rotation using lerp
-        if (keyW) {
-            float rotationSpeed = 10.0f; // How fast to rotate (higher = faster)
-            
-            // Calculate the shortest rotation direction
-            // Add 180 so character faces forward (back to camera)
-            float targetYaw = player.yaw + 180.0f;
-            float diff = targetYaw - player.bodyYaw;
-            
-            // Normalize the difference to be between -180 and 180
-            while (diff > 180.0f) diff -= 360.0f;
-            while (diff < -180.0f) diff += 360.0f;
-            
-            // Smoothly interpolate towards target
-            player.bodyYaw += diff * rotationSpeed * deltaTime;
-            
-            // Keep bodyYaw in reasonable range
-            while (player.bodyYaw > 360.0f) player.bodyYaw -= 360.0f;
-            while (player.bodyYaw < 0.0f) player.bodyYaw += 360.0f;
-        }
+        // Update body rotation ONLY when moving to match camera direction
+        float rotationSpeed = 10.0f; // How fast to rotate (higher = faster)
+        
+        // Calculate movement direction relative to camera
+        // Character should face the direction it's moving
+        // Negate the angle to match camera rotation direction
+        float moveAngle = atan2(-right, forward) * 180.0f / 3.14159f;
+        float targetYaw = player.yaw + moveAngle;
+        
+        float diff = targetYaw - player.bodyYaw;
+        
+        // Normalize the difference to be between -180 and 180
+        while (diff > 180.0f) diff -= 360.0f;
+        while (diff < -180.0f) diff += 360.0f;
+        
+        // Smoothly interpolate towards target
+        player.bodyYaw += diff * rotationSpeed * deltaTime;
+        
+        // Keep bodyYaw in reasonable range
+        while (player.bodyYaw > 360.0f) player.bodyYaw -= 360.0f;
+        while (player.bodyYaw < 0.0f) player.bodyYaw += 360.0f;
     } else {
         player.isMoving = false;
     }
