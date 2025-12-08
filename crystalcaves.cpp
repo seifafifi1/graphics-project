@@ -2041,9 +2041,9 @@ public:
             delete cowModel;
             cowModel = nullptr;
         }
-        cowTexture = loadTexture("models/cow2.png");
+        cowTexture = loadTexture("pig texture.jpg");
         if (cowTexture) {
-            std::cout << "Cow texture loaded successfully!" << std::endl;
+            std::cout << "Cow texture (pig texture) loaded successfully!" << std::endl;
         }
         
         // Load Creeper model and texture
@@ -3545,10 +3545,10 @@ public:
     std::vector<Bat> bats;
 
     Scene2_DeepCavern() : Scene("Dark Stone Dungeon"), stoneTexture(0), lavaTexture(0), amethystTexture(0), batTexture(0), lavaDamageTimer(0.0f) {
-        // Very dark ambient for dungeon atmosphere
-        ambientLight[0] = 0.05f;
-        ambientLight[1] = 0.04f;
-        ambientLight[2] = 0.03f;
+        // Extremely dark ambient for dungeon atmosphere (old lighting)
+        ambientLight[0] = 0.02f;
+        ambientLight[1] = 0.02f;
+        ambientLight[2] = 0.02f;
         scene2Instance = this;  // Set global instance for collision callback
     }
     
@@ -5272,6 +5272,7 @@ void mouseClick(int button, int state, int x, int y) {
             // If dot product > 0.7, player is looking at the portal (within ~45 degrees)
             if (dot > 0.7f) {
                 portalOpened = true;
+                playKeySound();  // Play key sound when portal opens
                 std::cout << "*** PORTAL OPENED! Step inside to travel to Scene 2! ***" << std::endl;
             }
         }
