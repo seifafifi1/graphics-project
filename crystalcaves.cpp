@@ -881,6 +881,76 @@ public:
         glPopMatrix();
     }
     
+    // Render with procedural UV mapping based on vertex positions (for models without proper UVs)
+    void renderWithProceduralUV(float uvScale = 0.01f) const {
+        if (!isLoaded) return;
+        
+        glPushMatrix();
+        
+        glTranslatef(position.x, position.y, position.z);
+        glRotatef(rotation.x, 1.0f, 0.0f, 0.0f);
+        glRotatef(rotation.y, 0.0f, 1.0f, 0.0f);
+        glRotatef(rotation.z, 0.0f, 0.0f, 1.0f);
+        glScalef(scale.x, scale.y, scale.z);
+        
+        // Render with procedural UV based on vertex position
+        glBegin(GL_TRIANGLES);
+        for (const auto& face : faces) {
+            if (face.vertexIndices.size() < 3) continue;
+            
+            for (size_t i = 1; i < face.vertexIndices.size() - 1; i++) {
+                // First vertex
+                int vIdx = face.vertexIndices[0];
+                int nIdx = face.normalIndices[0];
+                if (vIdx >= 0 && vIdx < (int)vertices.size()) {
+                    // Generate UV from vertex position (box mapping)
+                    float u = vertices[vIdx].x * uvScale;
+                    float v = vertices[vIdx].y * uvScale;
+                    glTexCoord2f(u, v);
+                }
+                if (nIdx >= 0 && nIdx < (int)normals.size()) {
+                    glNormal3f(normals[nIdx].x, normals[nIdx].y, normals[nIdx].z);
+                }
+                if (vIdx >= 0 && vIdx < (int)vertices.size()) {
+                    glVertex3f(vertices[vIdx].x, vertices[vIdx].y, vertices[vIdx].z);
+                }
+                
+                // Second vertex
+                vIdx = face.vertexIndices[i];
+                nIdx = face.normalIndices[i];
+                if (vIdx >= 0 && vIdx < (int)vertices.size()) {
+                    float u = vertices[vIdx].x * uvScale;
+                    float v = vertices[vIdx].y * uvScale;
+                    glTexCoord2f(u, v);
+                }
+                if (nIdx >= 0 && nIdx < (int)normals.size()) {
+                    glNormal3f(normals[nIdx].x, normals[nIdx].y, normals[nIdx].z);
+                }
+                if (vIdx >= 0 && vIdx < (int)vertices.size()) {
+                    glVertex3f(vertices[vIdx].x, vertices[vIdx].y, vertices[vIdx].z);
+                }
+                
+                // Third vertex
+                vIdx = face.vertexIndices[i + 1];
+                nIdx = face.normalIndices[i + 1];
+                if (vIdx >= 0 && vIdx < (int)vertices.size()) {
+                    float u = vertices[vIdx].x * uvScale;
+                    float v = vertices[vIdx].y * uvScale;
+                    glTexCoord2f(u, v);
+                }
+                if (nIdx >= 0 && nIdx < (int)normals.size()) {
+                    glNormal3f(normals[nIdx].x, normals[nIdx].y, normals[nIdx].z);
+                }
+                if (vIdx >= 0 && vIdx < (int)vertices.size()) {
+                    glVertex3f(vertices[vIdx].x, vertices[vIdx].y, vertices[vIdx].z);
+                }
+            }
+        }
+        glEnd();
+        
+        glPopMatrix();
+    }
+    
     // Render with custom color (ignores material)
     void renderWithColor(float r, float g, float b, float a = 1.0f) const {
         if (!isLoaded) return;
@@ -1293,6 +1363,103 @@ int currentScene = 1;
 typedef bool (*CollisionCheckFunc)(float x, float z, float radius);
 CollisionCheckFunc sceneCollisionCheck = nullptr;
 
+// Global steve textures for player rendering
+GLuint g_steveFaceTexture = 0;
+
+// Draw a solid colored cube (no texture) for Steve's body parts
+void drawColoredCube() {
+    glBegin(GL_QUADS);
+    // Front face (+Z)
+    glNormal3f(0.0f, 0.0f, 1.0f);
+    glVertex3f(-0.5f, -0.5f, 0.5f);
+    glVertex3f(0.5f, -0.5f, 0.5f);
+    glVertex3f(0.5f, 0.5f, 0.5f);
+    glVertex3f(-0.5f, 0.5f, 0.5f);
+    
+    // Back face (-Z)
+    glNormal3f(0.0f, 0.0f, -1.0f);
+    glVertex3f(-0.5f, -0.5f, -0.5f);
+    glVertex3f(-0.5f, 0.5f, -0.5f);
+    glVertex3f(0.5f, 0.5f, -0.5f);
+    glVertex3f(0.5f, -0.5f, -0.5f);
+    
+    // Top face (+Y)
+    glNormal3f(0.0f, 1.0f, 0.0f);
+    glVertex3f(-0.5f, 0.5f, -0.5f);
+    glVertex3f(-0.5f, 0.5f, 0.5f);
+    glVertex3f(0.5f, 0.5f, 0.5f);
+    glVertex3f(0.5f, 0.5f, -0.5f);
+    
+    // Bottom face (-Y)
+    glNormal3f(0.0f, -1.0f, 0.0f);
+    glVertex3f(-0.5f, -0.5f, -0.5f);
+    glVertex3f(0.5f, -0.5f, -0.5f);
+    glVertex3f(0.5f, -0.5f, 0.5f);
+    glVertex3f(-0.5f, -0.5f, 0.5f);
+    
+    // Right face (+X)
+    glNormal3f(1.0f, 0.0f, 0.0f);
+    glVertex3f(0.5f, -0.5f, -0.5f);
+    glVertex3f(0.5f, 0.5f, -0.5f);
+    glVertex3f(0.5f, 0.5f, 0.5f);
+    glVertex3f(0.5f, -0.5f, 0.5f);
+    
+    // Left face (-X)
+    glNormal3f(-1.0f, 0.0f, 0.0f);
+    glVertex3f(-0.5f, -0.5f, -0.5f);
+    glVertex3f(-0.5f, -0.5f, 0.5f);
+    glVertex3f(-0.5f, 0.5f, 0.5f);
+    glVertex3f(-0.5f, 0.5f, -0.5f);
+    glEnd();
+}
+
+// Draw a textured cube for Steve's head (with UV coordinates)
+void drawTexturedCube() {
+    glBegin(GL_QUADS);
+    // Front face (+Z)
+    glNormal3f(0.0f, 0.0f, 1.0f);
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, -0.5f, 0.5f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, -0.5f, 0.5f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, 0.5f, 0.5f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, 0.5f, 0.5f);
+    
+    // Back face (-Z)
+    glNormal3f(0.0f, 0.0f, -1.0f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(-0.5f, -0.5f, -0.5f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(-0.5f, 0.5f, -0.5f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(0.5f, 0.5f, -0.5f);
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(0.5f, -0.5f, -0.5f);
+    
+    // Top face (+Y)
+    glNormal3f(0.0f, 1.0f, 0.0f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, 0.5f, -0.5f);
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, 0.5f, 0.5f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, 0.5f, 0.5f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, 0.5f, -0.5f);
+    
+    // Bottom face (-Y)
+    glNormal3f(0.0f, -1.0f, 0.0f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(-0.5f, -0.5f, -0.5f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(0.5f, -0.5f, -0.5f);
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(0.5f, -0.5f, 0.5f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(-0.5f, -0.5f, 0.5f);
+    
+    // Right face (+X)
+    glNormal3f(1.0f, 0.0f, 0.0f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, -0.5f, -0.5f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, 0.5f, -0.5f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(0.5f, 0.5f, 0.5f);
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(0.5f, -0.5f, 0.5f);
+    
+    // Left face (-X)
+    glNormal3f(-1.0f, 0.0f, 0.0f);
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, -0.5f, -0.5f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(-0.5f, -0.5f, 0.5f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(-0.5f, 0.5f, 0.5f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, 0.5f, -0.5f);
+    glEnd();
+}
+
 // ============================================================================
 // PLAYER CLASS
 // ============================================================================
@@ -1420,58 +1587,74 @@ public:
         }
         
         // Head (cube) - bobs when walking and tilts with camera pitch
-        glColor3f(0.8f, 0.6f, 0.5f); // Skin tone
         glPushMatrix();
         glTranslatef(0.0f, 1.5f + bodyBounce + jumpSquash * 0.5f, 0.0f);
         glRotatef(-pitch, 1.0f, 0.0f, 0.0f); // Head tilts up/down with camera pitch
         glScalef(0.5f, 0.5f, 0.5f);
-        glutSolidCube(1.0f);
         
-        // Draw face on the front of the head
-        glDisable(GL_LIGHTING); // Disable lighting for face features
-        
-        // Left Eye (on front side, z = 0.51)
-        glColor3f(0.0f, 0.0f, 0.0f); // Black
-        glPushMatrix();
-        glTranslatef(-0.2f, 0.15f, 0.51f); // Left side of face
-        glScalef(0.15f, 0.2f, 0.05f);
-        glutSolidCube(1.0f);
-        glPopMatrix();
-        
-        // Right Eye (on front side)
-        glPushMatrix();
-        glTranslatef(0.2f, 0.15f, 0.51f); // Right side of face
-        glScalef(0.15f, 0.2f, 0.05f);
-        glutSolidCube(1.0f);
-        glPopMatrix();
-        
-        // Mouth (simple rectangle on front side)
-        glPushMatrix();
-        glTranslatef(0.0f, -0.2f, 0.51f); // Center, below eyes, front of head
-        glScalef(0.4f, 0.1f, 0.05f);
-        glutSolidCube(1.0f);
-        glPopMatrix();
-        
-        glEnable(GL_LIGHTING); // Re-enable lighting
+        // Use Steve face texture if available
+        if (g_steveFaceTexture) {
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, g_steveFaceTexture);
+            glColor3f(1.0f, 1.0f, 1.0f);
+            drawTexturedCube();
+            glDisable(GL_TEXTURE_2D);
+        } else {
+            glColor3f(0.8f, 0.6f, 0.5f); // Skin tone fallback
+            glutSolidCube(1.0f);
+            
+            // Draw face on the front of the head (fallback)
+            glDisable(GL_LIGHTING);
+            glColor3f(0.0f, 0.0f, 0.0f);
+            glPushMatrix();
+            glTranslatef(-0.2f, 0.15f, 0.51f);
+            glScalef(0.15f, 0.2f, 0.05f);
+            glutSolidCube(1.0f);
+            glPopMatrix();
+            glPushMatrix();
+            glTranslatef(0.2f, 0.15f, 0.51f);
+            glScalef(0.15f, 0.2f, 0.05f);
+            glutSolidCube(1.0f);
+            glPopMatrix();
+            glPushMatrix();
+            glTranslatef(0.0f, -0.2f, 0.51f);
+            glScalef(0.4f, 0.1f, 0.05f);
+            glutSolidCube(1.0f);
+            glPopMatrix();
+            glEnable(GL_LIGHTING);
+        }
         
         glPopMatrix();
         
         // Body (cube) - bounces when walking, stretches when jumping
-        glColor3f(0.2f, 0.2f, 0.8f); // Blue shirt
+        // Steve's iconic cyan/teal shirt
         glPushMatrix();
         glTranslatef(0.0f, 0.9f + bodyBounce, 0.0f);
         glScalef(0.5f, 0.75f + jumpSquash, 0.25f);
-        glutSolidCube(1.0f);
+        glColor3f(0.0f, 0.67f, 0.67f); // Cyan/teal shirt color
+        drawColoredCube();
         glPopMatrix();
         
         // Left Arm - swings when walking
-        glColor3f(0.2f, 0.2f, 0.8f); // Blue shirt (same as body)
+        // Upper arm is cyan shirt, lower part is skin
         glPushMatrix();
         glTranslatef(-0.375f, 1.15f + bodyBounce, 0.0f); // Move to shoulder
         glRotatef(-armSwing, 1.0f, 0.0f, 0.0f); // Rotate from shoulder
         glTranslatef(0.0f, -0.25f, 0.0f); // Offset to center of arm
-        glScalef(0.25f, 0.75f, 0.25f);
-        glutSolidCube(1.0f);
+        // Upper arm (shirt sleeve)
+        glPushMatrix();
+        glTranslatef(0.0f, 0.15f, 0.0f);
+        glScalef(0.25f, 0.35f, 0.25f);
+        glColor3f(0.0f, 0.67f, 0.67f); // Cyan shirt sleeve
+        drawColoredCube();
+        glPopMatrix();
+        // Lower arm (skin)
+        glPushMatrix();
+        glTranslatef(0.0f, -0.2f, 0.0f);
+        glScalef(0.25f, 0.35f, 0.25f);
+        glColor3f(0.76f, 0.6f, 0.42f); // Skin color
+        drawColoredCube();
+        glPopMatrix();
         glPopMatrix();
         
         // Right Arm - swings opposite to left arm
@@ -1479,18 +1662,31 @@ public:
         glTranslatef(0.375f, 1.15f + bodyBounce, 0.0f); // Move to shoulder
         glRotatef(armSwing, 1.0f, 0.0f, 0.0f); // Rotate from shoulder (opposite direction)
         glTranslatef(0.0f, -0.25f, 0.0f); // Offset to center of arm
-        glScalef(0.25f, 0.75f, 0.25f);
-        glutSolidCube(1.0f);
+        // Upper arm (shirt sleeve)
+        glPushMatrix();
+        glTranslatef(0.0f, 0.15f, 0.0f);
+        glScalef(0.25f, 0.35f, 0.25f);
+        glColor3f(0.0f, 0.67f, 0.67f); // Cyan shirt sleeve
+        drawColoredCube();
+        glPopMatrix();
+        // Lower arm (skin)
+        glPushMatrix();
+        glTranslatef(0.0f, -0.2f, 0.0f);
+        glScalef(0.25f, 0.35f, 0.25f);
+        glColor3f(0.76f, 0.6f, 0.42f); // Skin color
+        drawColoredCube();
+        glPopMatrix();
         glPopMatrix();
         
         // Left Leg - swings when walking
-        glColor3f(0.1f, 0.1f, 0.4f); // Dark blue pants
+        // Steve's dark blue pants
         glPushMatrix();
         glTranslatef(-0.125f, 0.6f + bodyBounce, 0.0f); // Move to hip
         glRotatef(legSwing, 1.0f, 0.0f, 0.0f); // Rotate from hip
         glTranslatef(0.0f, -0.3f, 0.0f); // Offset to center of leg
         glScalef(0.25f, 0.6f, 0.25f);
-        glutSolidCube(1.0f);
+        glColor3f(0.16f, 0.21f, 0.55f); // Dark blue pants
+        drawColoredCube();
         glPopMatrix();
         
         // Right Leg - swings opposite to left leg
@@ -1499,7 +1695,8 @@ public:
         glRotatef(-legSwing, 1.0f, 0.0f, 0.0f); // Rotate from hip (opposite direction)
         glTranslatef(0.0f, -0.3f, 0.0f); // Offset to center of leg
         glScalef(0.25f, 0.6f, 0.25f);
-        glutSolidCube(1.0f);
+        glColor3f(0.16f, 0.21f, 0.55f); // Dark blue pants
+        drawColoredCube();
         glPopMatrix();
         
         glPopMatrix();
@@ -1647,6 +1844,8 @@ private:
     Model3DS* flockModel;  // Flock 3DS model
     GLuint grassTexture;  // Floor grass texture
     GLuint flockTexture;  // Flock/bird texture
+    GLuint skyTexture;    // Sky texture
+    GLuint steveFaceTexture;  // Steve face texture for player head
     
     // Wolf position and AI
     Vector3 wolfPosition;
@@ -1724,6 +1923,7 @@ public:
                             wolfModel(nullptr), wolfTexture(0), cowModel(nullptr), cowTexture(0),
                             creeperModel(nullptr), creeperTexture(0), flockModel(nullptr),
                             grassTexture(0), stoneTexture(0), flockTexture(0), wallTexture(0),
+                            skyTexture(0), steveFaceTexture(0),
                             wolfPosition(-10.0f, 0.0f, 10.0f), wolfRotation(0.0f),
                             wolfWanderTime(0.0f), wolfTargetPosition(-10.0f, 0.0f, 10.0f), wolfMoveSpeed(0.03f),
                             cowPosition(-15.0f, 0.0f, -15.0f), cowRotation(0.0f),
@@ -1798,6 +1998,21 @@ public:
             std::cout << "Stone texture loaded successfully!" << std::endl;
         }
         
+        // Load sky texture
+        skyTexture = loadTexture("models/sky.jpg");
+        if (skyTexture) {
+            std::cout << "Sky texture loaded successfully!" << std::endl;
+        }
+        
+        // Load Steve face texture for player head
+        steveFaceTexture = loadTexture("models/steveFace.jpg");
+        if (steveFaceTexture) {
+            std::cout << "Steve face texture loaded successfully!" << std::endl;
+        }
+        
+        // Copy steve face texture to global variable for Player class access
+        g_steveFaceTexture = steveFaceTexture;
+        
         // Load wolf model and texture (replaces dog)
         wolfModel = new OBJModel();
         if (wolfModel->load("models/wolf_minecraft.obj")) {
@@ -1835,7 +2050,7 @@ public:
             delete creeperModel;
             creeperModel = nullptr;
         }
-        creeperTexture = loadTexture("models/creeper.png");
+        creeperTexture = loadTexture("models/creeper2.jpg");
         if (creeperTexture) {
             std::cout << "Creeper texture loaded successfully!" << std::endl;
         }
@@ -2040,25 +2255,37 @@ public:
                 glRotatef(creepers[i].rotation, 0.0f, 1.0f, 0.0f);
                 glScalef(creeperScale, creeperScale, creeperScale);
                 
-                glDisable(GL_TEXTURE_2D);
-                
                 // Flash when about to explode
                 float flashIntensity = 0.0f;
                 if (creepers[i].chasing && creepers[i].fuseTime > 0.0f) {
                     flashIntensity = (sin(creepers[i].fuseTime * 15.0f) + 1.0f) * 0.5f;
                 }
                 
-                // Dark green color for creeper body
-                float greenR = 0.1f + flashIntensity * 0.9f;
-                float greenG = 0.5f + flashIntensity * 0.5f;
-                float greenB = 0.1f + flashIntensity * 0.9f;
-                GLfloat creeperDiffuse[] = { greenR, greenG, greenB, 1.0f };
-                GLfloat creeperAmbient[] = { greenR * 0.5f, greenG * 0.5f, greenB * 0.5f, 1.0f };
-                glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, creeperDiffuse);
-                glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, creeperAmbient);
-                glColor3f(greenR, greenG, greenB);
-                
-                creeperModel->render();
+                // Use creeper2.jpg texture for the body
+                if (creeperTexture) {
+                    glEnable(GL_TEXTURE_2D);
+                    glBindTexture(GL_TEXTURE_2D, creeperTexture);
+                    // Set texture to repeat for proper tiling
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+                    // Tint with flash effect when exploding
+                    float tintR = 1.0f + flashIntensity * 0.5f;
+                    float tintG = 1.0f + flashIntensity * 0.5f;
+                    float tintB = 1.0f + flashIntensity * 0.5f;
+                    glColor3f(tintR, tintG, tintB);
+                    GLfloat creeperDiffuse[] = { 0.8f, 0.8f, 0.8f, 1.0f };
+                    GLfloat creeperAmbient[] = { 0.5f, 0.5f, 0.5f, 1.0f };
+                    glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, creeperDiffuse);
+                    glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, creeperAmbient);
+                    // Use procedural UV mapping - creeper model is about 375 units tall (-260 to 115)
+                    // Scale of 0.015 gives more frequent texture tiling (5x smaller pattern)
+                    creeperModel->renderWithProceduralUV(0.015f);
+                    glDisable(GL_TEXTURE_2D);
+                } else {
+                    glDisable(GL_TEXTURE_2D);
+                    glColor3f(0.3f, 0.3f, 0.3f);  // Gray fallback
+                    creeperModel->render();
+                }
                 
                 // Draw creeper face - model coords: X=side(±33), Y=up(-260 to 115), Z=front/back(±160)
                 // Head is at Y=50 to 115, face should be on +Z side (around Z=34)
@@ -2636,49 +2863,113 @@ private:
     }
     
     void drawSky() {
+        // Save current matrix state
+        glPushAttrib(GL_ALL_ATTRIB_BITS);
         glPushMatrix();
+        
+        // Disable everything that could interfere
         glDisable(GL_LIGHTING);
+        glDisable(GL_DEPTH_TEST);
+        glDepthMask(GL_FALSE);
+        glDisable(GL_CULL_FACE);
+        glDisable(GL_BLEND);
         
-        // Draw a simple sky gradient using a large quad behind everything
+        // Move skybox to player position so player is always at center
+        glTranslatef(player.position.x, player.position.y, player.position.z);
+        
+        // Size of the skybox cube (half-extent) - make it very large
+        float s = 400.0f;
+        
+        // Always draw the textured skybox if texture exists, otherwise use color
+        if (skyTexture != 0) {
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, skyTexture);
+            glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+            glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+        } else {
+            glDisable(GL_TEXTURE_2D);
+            glColor3f(0.5f, 0.7f, 1.0f);  // Light blue fallback
+        }
+        
+        // FRONT FACE (+Z) - looking from inside toward +Z
         glBegin(GL_QUADS);
-        // Bottom of sky (light blue near horizon)
-        glColor3f(0.7f, 0.85f, 0.95f);
-        glVertex3f(-100.0f, 0.0f, -100.0f);
-        glVertex3f(100.0f, 0.0f, -100.0f);
-        // Top of sky (bright sky blue)
-        glColor3f(0.53f, 0.81f, 0.92f);
-        glVertex3f(100.0f, 50.0f, -100.0f);
-        glVertex3f(-100.0f, 50.0f, -100.0f);
+        glTexCoord2f(0.0f, 0.0f); glVertex3f(-s, -s,  s);
+        glTexCoord2f(1.0f, 0.0f); glVertex3f( s, -s,  s);
+        glTexCoord2f(1.0f, 1.0f); glVertex3f( s,  s,  s);
+        glTexCoord2f(0.0f, 1.0f); glVertex3f(-s,  s,  s);
         glEnd();
         
-        // Draw a bright sun (square shape) - this is the light source
-        glPushMatrix();
-        glTranslatef(30.0f, 35.0f, -80.0f);
-        
-        // Draw sun glow/halo
-        glColor4f(1.0f, 0.95f, 0.7f, 0.3f);
-        float glowSize = 8.0f;
+        // BACK FACE (-Z) - looking from inside toward -Z
         glBegin(GL_QUADS);
-        glVertex3f(-glowSize, -glowSize, 0.0f);
-        glVertex3f(glowSize, -glowSize, 0.0f);
-        glVertex3f(glowSize, glowSize, 0.0f);
-        glVertex3f(-glowSize, glowSize, 0.0f);
+        glTexCoord2f(0.0f, 0.0f); glVertex3f( s, -s, -s);
+        glTexCoord2f(1.0f, 0.0f); glVertex3f(-s, -s, -s);
+        glTexCoord2f(1.0f, 1.0f); glVertex3f(-s,  s, -s);
+        glTexCoord2f(0.0f, 1.0f); glVertex3f( s,  s, -s);
         glEnd();
         
-        // Draw bright sun core
-        glColor3f(1.0f, 1.0f, 0.9f);
-        float sunSize = 5.0f;
+        // LEFT FACE (-X) - looking from inside toward -X
         glBegin(GL_QUADS);
-        glVertex3f(-sunSize, -sunSize, 0.0f);
-        glVertex3f(sunSize, -sunSize, 0.0f);
-        glVertex3f(sunSize, sunSize, 0.0f);
-        glVertex3f(-sunSize, sunSize, 0.0f);
+        glTexCoord2f(0.0f, 0.0f); glVertex3f(-s, -s, -s);
+        glTexCoord2f(1.0f, 0.0f); glVertex3f(-s, -s,  s);
+        glTexCoord2f(1.0f, 1.0f); glVertex3f(-s,  s,  s);
+        glTexCoord2f(0.0f, 1.0f); glVertex3f(-s,  s, -s);
         glEnd();
         
+        // RIGHT FACE (+X) - looking from inside toward +X
+        glBegin(GL_QUADS);
+        glTexCoord2f(0.0f, 0.0f); glVertex3f( s, -s,  s);
+        glTexCoord2f(1.0f, 0.0f); glVertex3f( s, -s, -s);
+        glTexCoord2f(1.0f, 1.0f); glVertex3f( s,  s, -s);
+        glTexCoord2f(0.0f, 1.0f); glVertex3f( s,  s,  s);
+        glEnd();
+        
+        // TOP FACE (+Y) - looking from inside toward +Y (up)
+        glBegin(GL_QUADS);
+        glTexCoord2f(0.0f, 0.0f); glVertex3f(-s,  s,  s);
+        glTexCoord2f(1.0f, 0.0f); glVertex3f( s,  s,  s);
+        glTexCoord2f(1.0f, 1.0f); glVertex3f( s,  s, -s);
+        glTexCoord2f(0.0f, 1.0f); glVertex3f(-s,  s, -s);
+        glEnd();
+        
+        // BOTTOM FACE (-Y) - looking from inside toward -Y (down)
+        glBegin(GL_QUADS);
+        glTexCoord2f(0.0f, 0.0f); glVertex3f(-s, -s, -s);
+        glTexCoord2f(1.0f, 0.0f); glVertex3f( s, -s, -s);
+        glTexCoord2f(1.0f, 1.0f); glVertex3f( s, -s,  s);
+        glTexCoord2f(0.0f, 1.0f); glVertex3f(-s, -s,  s);
+        glEnd();
+        
+        glDisable(GL_TEXTURE_2D);
+        
+        // Draw sun on the back wall (-Z direction, slightly in front of the wall)
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        
+        // Sun glow
+        glColor4f(1.0f, 0.9f, 0.6f, 0.6f);
+        float glow = 50.0f;
+        glBegin(GL_QUADS);
+        glVertex3f(80.0f - glow, 150.0f - glow, -s + 1.0f);
+        glVertex3f(80.0f + glow, 150.0f - glow, -s + 1.0f);
+        glVertex3f(80.0f + glow, 150.0f + glow, -s + 1.0f);
+        glVertex3f(80.0f - glow, 150.0f + glow, -s + 1.0f);
+        glEnd();
+        
+        // Sun core (bright yellow-white)
+        glColor3f(1.0f, 1.0f, 0.85f);
+        float sun = 25.0f;
+        glBegin(GL_QUADS);
+        glVertex3f(80.0f - sun, 150.0f - sun, -s + 2.0f);
+        glVertex3f(80.0f + sun, 150.0f - sun, -s + 2.0f);
+        glVertex3f(80.0f + sun, 150.0f + sun, -s + 2.0f);
+        glVertex3f(80.0f - sun, 150.0f + sun, -s + 2.0f);
+        glEnd();
+        
+        glDisable(GL_BLEND);
+        
+        // Restore state
         glPopMatrix();
-        
-        glEnable(GL_LIGHTING);
-        glPopMatrix();
+        glPopAttrib();
     }
     
     void drawChest() {
@@ -3152,6 +3443,8 @@ class Scene2_DeepCavern : public Scene {
 private:
     GLuint stoneTexture;  // Stone texture for walls/floor/ceiling
     GLuint lavaTexture;   // Lava texture for lava pools
+    GLuint amethystTexture;  // Amethyst texture for crystals
+    GLuint batTexture;    // Bat texture for flying bats
     
     // Room dimensions - same as Scene 1 (100x100)
     float roomWidth = 100.0f;
@@ -3216,7 +3509,7 @@ public:
     };
     std::vector<Bat> bats;
 
-    Scene2_DeepCavern() : Scene("Dark Stone Dungeon"), stoneTexture(0), lavaTexture(0), lavaDamageTimer(0.0f) {
+    Scene2_DeepCavern() : Scene("Dark Stone Dungeon"), stoneTexture(0), lavaTexture(0), amethystTexture(0), batTexture(0), lavaDamageTimer(0.0f) {
         // Very dark ambient for dungeon atmosphere
         ambientLight[0] = 0.05f;
         ambientLight[1] = 0.04f;
@@ -3304,6 +3597,18 @@ public:
         stoneTexture = loadTexture("models/minecraft_stone.jpg");
         if (stoneTexture) {
             std::cout << "Stone texture loaded for dungeon!" << std::endl;
+        }
+        
+        // Load amethyst texture for crystals
+        amethystTexture = loadTexture("models/amethyst.jpg");
+        if (amethystTexture) {
+            std::cout << "Amethyst texture loaded for crystals!" << std::endl;
+        }
+        
+        // Load bat texture for flying bats
+        batTexture = loadTexture("models/bat.jpg");
+        if (batTexture) {
+            std::cout << "Bat texture loaded for flying bats!" << std::endl;
         }
         
         // Load stones and trap models
@@ -3618,15 +3923,26 @@ public:
         
         glDisable(GL_TEXTURE_2D);
         
-        // Draw stones
+        // Draw stones with minecraft_stone texture
         if (stonesModel) {
+            if (stoneTexture) {
+                glEnable(GL_TEXTURE_2D);
+                glBindTexture(GL_TEXTURE_2D, stoneTexture);
+            }
             for (const auto& stone : stones) {
                 glPushMatrix();
                 glTranslatef(stone.position.x, stone.position.y, stone.position.z);
                 glRotatef(stone.rotation, 0.0f, 1.0f, 0.0f);
                 glScalef(stone.scale, stone.scale, stone.scale);
-                stonesModel->render();
+                if (stoneTexture) {
+                    stonesModel->renderWithTexture();
+                } else {
+                    stonesModel->render();
+                }
                 glPopMatrix();
+            }
+            if (stoneTexture) {
+                glDisable(GL_TEXTURE_2D);
             }
         }
         
@@ -3865,6 +4181,14 @@ public:
             glDeleteTextures(1, &lavaTexture);
             lavaTexture = 0;
         }
+        if (amethystTexture) {
+            glDeleteTextures(1, &amethystTexture);
+            amethystTexture = 0;
+        }
+        if (batTexture) {
+            glDeleteTextures(1, &batTexture);
+            batTexture = 0;
+        }
         if (stonesModel) {
             delete stonesModel;
             stonesModel = nullptr;
@@ -3893,26 +4217,55 @@ private:
         
         glScalef(bat.size, bat.size, bat.size);
         
-        // Dark gray/brown bat material
-        glDisable(GL_TEXTURE_2D);
-        GLfloat batDiffuse[] = { 0.15f, 0.12f, 0.1f, 1.0f };
-        GLfloat batAmbient[] = { 0.08f, 0.06f, 0.05f, 1.0f };
+        // Enable bat texture if available
+        bool useTexture = (batTexture != 0);
+        if (useTexture) {
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, batTexture);
+            glColor3f(1.0f, 1.0f, 1.0f);  // Use texture colors
+        } else {
+            // Dark gray/brown bat material (fallback)
+            glDisable(GL_TEXTURE_2D);
+            glColor3f(0.15f, 0.12f, 0.1f);
+        }
+        
+        GLfloat batDiffuse[] = { 0.6f, 0.6f, 0.6f, 1.0f };
+        GLfloat batAmbient[] = { 0.4f, 0.4f, 0.4f, 1.0f };
         glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, batDiffuse);
         glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, batAmbient);
-        glColor3f(0.15f, 0.12f, 0.1f);
         
-        // Body (elongated sphere)
+        // Body (elongated sphere) - draw as textured quad sphere approximation
         glPushMatrix();
         glScalef(0.4f, 0.3f, 0.8f);
-        glutSolidSphere(1.0f, 10, 8);
+        if (useTexture) {
+            GLUquadric* quadric = gluNewQuadric();
+            gluQuadricTexture(quadric, GL_TRUE);
+            gluQuadricNormals(quadric, GLU_SMOOTH);
+            gluSphere(quadric, 1.0f, 12, 8);
+            gluDeleteQuadric(quadric);
+        } else {
+            glutSolidSphere(1.0f, 10, 8);
+        }
         glPopMatrix();
         
         // Head (small sphere at front)
         glPushMatrix();
         glTranslatef(0.0f, 0.1f, 0.7f);
-        glutSolidSphere(0.35f, 8, 6);
+        if (useTexture) {
+            GLUquadric* quadric = gluNewQuadric();
+            gluQuadricTexture(quadric, GL_TRUE);
+            gluQuadricNormals(quadric, GLU_SMOOTH);
+            gluSphere(quadric, 0.35f, 10, 6);
+            gluDeleteQuadric(quadric);
+        } else {
+            glutSolidSphere(0.35f, 8, 6);
+        }
         
         // Ears (small cones)
+        if (useTexture) {
+            glDisable(GL_TEXTURE_2D);
+            glColor3f(0.15f, 0.12f, 0.1f);
+        }
         glPushMatrix();
         glTranslatef(-0.15f, 0.25f, 0.0f);
         glRotatef(-20.0f, 0.0f, 0.0f, 1.0f);
@@ -3950,9 +4303,15 @@ private:
         glPopMatrix();  // End head
         
         // Wings (animated triangular membranes)
+        if (useTexture) {
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, batTexture);
+            glColor3f(1.0f, 1.0f, 1.0f);
+        } else {
+            glColor3f(0.12f, 0.1f, 0.08f);
+        }
         glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, batDiffuse);
         glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, batAmbient);
-        glColor3f(0.12f, 0.1f, 0.08f);
         
         float wingFlap = sin(bat.wingAngle) * 40.0f;  // -40 to +40 degrees
         
@@ -3965,20 +4324,21 @@ private:
         // Wing membrane - multiple triangular segments
         glNormal3f(0.0f, 1.0f, 0.0f);
         // Main wing section
-        glVertex3f(0.0f, 0.0f, -0.3f);
-        glVertex3f(-2.0f, 0.0f, 0.0f);
-        glVertex3f(0.0f, 0.0f, 0.5f);
+        glTexCoord2f(0.5f, 0.3f); glVertex3f(0.0f, 0.0f, -0.3f);
+        glTexCoord2f(0.0f, 0.5f); glVertex3f(-2.0f, 0.0f, 0.0f);
+        glTexCoord2f(0.5f, 0.8f); glVertex3f(0.0f, 0.0f, 0.5f);
         // Wing tip section
-        glVertex3f(-2.0f, 0.0f, 0.0f);
-        glVertex3f(-2.2f, 0.0f, -0.2f);
-        glVertex3f(-1.5f, 0.0f, -0.4f);
+        glTexCoord2f(0.0f, 0.5f); glVertex3f(-2.0f, 0.0f, 0.0f);
+        glTexCoord2f(0.0f, 0.3f); glVertex3f(-2.2f, 0.0f, -0.2f);
+        glTexCoord2f(0.2f, 0.2f); glVertex3f(-1.5f, 0.0f, -0.4f);
         // Inner section
-        glVertex3f(0.0f, 0.0f, -0.3f);
-        glVertex3f(-1.5f, 0.0f, -0.4f);
-        glVertex3f(-2.0f, 0.0f, 0.0f);
+        glTexCoord2f(0.5f, 0.3f); glVertex3f(0.0f, 0.0f, -0.3f);
+        glTexCoord2f(0.2f, 0.2f); glVertex3f(-1.5f, 0.0f, -0.4f);
+        glTexCoord2f(0.0f, 0.5f); glVertex3f(-2.0f, 0.0f, 0.0f);
         glEnd();
         
         // Wing finger bones
+        if (useTexture) glDisable(GL_TEXTURE_2D);
         glColor3f(0.2f, 0.15f, 0.12f);
         glBegin(GL_LINES);
         glVertex3f(0.0f, 0.02f, 0.0f);
@@ -3996,24 +4356,31 @@ private:
         glTranslatef(0.3f, 0.0f, 0.0f);
         glRotatef(-wingFlap + 10.0f, 0.0f, 0.0f, 1.0f);
         
-        glColor3f(0.12f, 0.1f, 0.08f);
+        if (useTexture) {
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, batTexture);
+            glColor3f(1.0f, 1.0f, 1.0f);
+        } else {
+            glColor3f(0.12f, 0.1f, 0.08f);
+        }
         glBegin(GL_TRIANGLES);
         glNormal3f(0.0f, 1.0f, 0.0f);
         // Main wing section
-        glVertex3f(0.0f, 0.0f, -0.3f);
-        glVertex3f(2.0f, 0.0f, 0.0f);
-        glVertex3f(0.0f, 0.0f, 0.5f);
+        glTexCoord2f(0.5f, 0.3f); glVertex3f(0.0f, 0.0f, -0.3f);
+        glTexCoord2f(1.0f, 0.5f); glVertex3f(2.0f, 0.0f, 0.0f);
+        glTexCoord2f(0.5f, 0.8f); glVertex3f(0.0f, 0.0f, 0.5f);
         // Wing tip section
-        glVertex3f(2.0f, 0.0f, 0.0f);
-        glVertex3f(2.2f, 0.0f, -0.2f);
-        glVertex3f(1.5f, 0.0f, -0.4f);
+        glTexCoord2f(1.0f, 0.5f); glVertex3f(2.0f, 0.0f, 0.0f);
+        glTexCoord2f(1.0f, 0.3f); glVertex3f(2.2f, 0.0f, -0.2f);
+        glTexCoord2f(0.8f, 0.2f); glVertex3f(1.5f, 0.0f, -0.4f);
         // Inner section
-        glVertex3f(0.0f, 0.0f, -0.3f);
-        glVertex3f(1.5f, 0.0f, -0.4f);
-        glVertex3f(2.0f, 0.0f, 0.0f);
+        glTexCoord2f(0.5f, 0.3f); glVertex3f(0.0f, 0.0f, -0.3f);
+        glTexCoord2f(0.8f, 0.2f); glVertex3f(1.5f, 0.0f, -0.4f);
+        glTexCoord2f(1.0f, 0.5f); glVertex3f(2.0f, 0.0f, 0.0f);
         glEnd();
         
         // Wing finger bones
+        if (useTexture) glDisable(GL_TEXTURE_2D);
         glColor3f(0.2f, 0.15f, 0.12f);
         glBegin(GL_LINES);
         glVertex3f(0.0f, 0.02f, 0.0f);
@@ -4112,12 +4479,18 @@ private:
         if (crystal.rotation > 360.0f) crystal.rotation -= 360.0f;
         glRotatef(crystal.rotation, 0.0f, 1.0f, 0.0f);
         
-        // Purple glowing material
+        // Enable amethyst texture
+        glEnable(GL_TEXTURE_2D);
+        if (amethystTexture) {
+            glBindTexture(GL_TEXTURE_2D, amethystTexture);
+        }
+        
+        // Purple glowing material with texture
         float glowPulse = 0.7f + 0.3f * sin(animationTime * 3.0f + crystal.bobPhase);
-        GLfloat crystalDiffuse[] = { 0.6f * glowPulse, 0.2f * glowPulse, 0.8f * glowPulse, 0.9f };
-        GLfloat crystalAmbient[] = { 0.4f * glowPulse, 0.1f * glowPulse, 0.5f * glowPulse, 0.9f };
-        GLfloat crystalEmission[] = { 0.5f * glowPulse, 0.2f * glowPulse, 0.7f * glowPulse, 1.0f };
-        GLfloat crystalSpecular[] = { 0.9f, 0.7f, 1.0f, 1.0f };
+        GLfloat crystalDiffuse[] = { 1.0f * glowPulse, 1.0f * glowPulse, 1.0f * glowPulse, 0.95f };
+        GLfloat crystalAmbient[] = { 0.6f * glowPulse, 0.4f * glowPulse, 0.7f * glowPulse, 0.95f };
+        GLfloat crystalEmission[] = { 0.3f * glowPulse, 0.15f * glowPulse, 0.4f * glowPulse, 1.0f };
+        GLfloat crystalSpecular[] = { 1.0f, 0.9f, 1.0f, 1.0f };
         
         glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, crystalDiffuse);
         glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, crystalAmbient);
@@ -4125,56 +4498,58 @@ private:
         glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, crystalSpecular);
         glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 100.0f);
         
-        glDisable(GL_TEXTURE_2D);
-        glColor4f(0.6f * glowPulse, 0.2f * glowPulse, 0.8f * glowPulse, 0.9f);
+        glColor4f(1.0f * glowPulse, 1.0f * glowPulse, 1.0f * glowPulse, 0.95f);
         
-        // Draw crystal as an octahedron (8-sided diamond shape)
-        float size = 0.4f;
+        // Draw crystal as an octahedron (8-sided diamond shape) with texture coords
+        float size = 0.5f;  // Slightly larger for better texture visibility
         glBegin(GL_TRIANGLES);
         
         // Top pyramid (4 faces)
         glNormal3f(0.0f, 1.0f, 1.0f);
-        glVertex3f(0.0f, size, 0.0f);
-        glVertex3f(-size, 0.0f, 0.0f);
-        glVertex3f(0.0f, 0.0f, size);
+        glTexCoord2f(0.5f, 1.0f); glVertex3f(0.0f, size, 0.0f);
+        glTexCoord2f(0.0f, 0.5f); glVertex3f(-size, 0.0f, 0.0f);
+        glTexCoord2f(0.5f, 0.5f); glVertex3f(0.0f, 0.0f, size);
         
         glNormal3f(1.0f, 1.0f, 0.0f);
-        glVertex3f(0.0f, size, 0.0f);
-        glVertex3f(0.0f, 0.0f, size);
-        glVertex3f(size, 0.0f, 0.0f);
+        glTexCoord2f(0.5f, 1.0f); glVertex3f(0.0f, size, 0.0f);
+        glTexCoord2f(0.5f, 0.5f); glVertex3f(0.0f, 0.0f, size);
+        glTexCoord2f(1.0f, 0.5f); glVertex3f(size, 0.0f, 0.0f);
         
         glNormal3f(0.0f, 1.0f, -1.0f);
-        glVertex3f(0.0f, size, 0.0f);
-        glVertex3f(size, 0.0f, 0.0f);
-        glVertex3f(0.0f, 0.0f, -size);
+        glTexCoord2f(0.5f, 1.0f); glVertex3f(0.0f, size, 0.0f);
+        glTexCoord2f(1.0f, 0.5f); glVertex3f(size, 0.0f, 0.0f);
+        glTexCoord2f(0.5f, 0.5f); glVertex3f(0.0f, 0.0f, -size);
         
         glNormal3f(-1.0f, 1.0f, 0.0f);
-        glVertex3f(0.0f, size, 0.0f);
-        glVertex3f(0.0f, 0.0f, -size);
-        glVertex3f(-size, 0.0f, 0.0f);
+        glTexCoord2f(0.5f, 1.0f); glVertex3f(0.0f, size, 0.0f);
+        glTexCoord2f(0.5f, 0.5f); glVertex3f(0.0f, 0.0f, -size);
+        glTexCoord2f(0.0f, 0.5f); glVertex3f(-size, 0.0f, 0.0f);
         
         // Bottom pyramid (4 faces)
         glNormal3f(0.0f, -1.0f, 1.0f);
-        glVertex3f(0.0f, -size, 0.0f);
-        glVertex3f(0.0f, 0.0f, size);
-        glVertex3f(-size, 0.0f, 0.0f);
+        glTexCoord2f(0.5f, 0.0f); glVertex3f(0.0f, -size, 0.0f);
+        glTexCoord2f(0.5f, 0.5f); glVertex3f(0.0f, 0.0f, size);
+        glTexCoord2f(0.0f, 0.5f); glVertex3f(-size, 0.0f, 0.0f);
         
         glNormal3f(1.0f, -1.0f, 0.0f);
-        glVertex3f(0.0f, -size, 0.0f);
-        glVertex3f(size, 0.0f, 0.0f);
-        glVertex3f(0.0f, 0.0f, size);
+        glTexCoord2f(0.5f, 0.0f); glVertex3f(0.0f, -size, 0.0f);
+        glTexCoord2f(1.0f, 0.5f); glVertex3f(size, 0.0f, 0.0f);
+        glTexCoord2f(0.5f, 0.5f); glVertex3f(0.0f, 0.0f, size);
         
         glNormal3f(0.0f, -1.0f, -1.0f);
-        glVertex3f(0.0f, -size, 0.0f);
-        glVertex3f(0.0f, 0.0f, -size);
-        glVertex3f(size, 0.0f, 0.0f);
+        glTexCoord2f(0.5f, 0.0f); glVertex3f(0.0f, -size, 0.0f);
+        glTexCoord2f(0.5f, 0.5f); glVertex3f(0.0f, 0.0f, -size);
+        glTexCoord2f(1.0f, 0.5f); glVertex3f(size, 0.0f, 0.0f);
         
         glNormal3f(-1.0f, -1.0f, 0.0f);
-        glVertex3f(0.0f, -size, 0.0f);
-        glVertex3f(-size, 0.0f, 0.0f);
-        glVertex3f(0.0f, 0.0f, -size);
+        glTexCoord2f(0.5f, 0.0f); glVertex3f(0.0f, -size, 0.0f);
+        glTexCoord2f(0.0f, 0.5f); glVertex3f(-size, 0.0f, 0.0f);
+        glTexCoord2f(0.5f, 0.5f); glVertex3f(0.0f, 0.0f, -size);
         
         glEnd();
+        
+        // Disable texture
+        glDisable(GL_TEXTURE_2D);
         
         // Reset emission
         GLfloat noEmission[] = { 0.0f, 0.0f, 0.0f, 1.0f };
@@ -4636,7 +5011,7 @@ void reshape(int w, int h) {
     glViewport(0, 0, w, h);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    gluPerspective(60.0f, (float)w / (float)h, 0.1f, 100.0f);
+    gluPerspective(60.0f, (float)w / (float)h, 0.1f, 1000.0f);  // Far plane at 1000 for skybox
     glMatrixMode(GL_MODELVIEW);
     
     // Hide cursor - use crosshair instead
