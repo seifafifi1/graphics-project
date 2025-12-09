@@ -1747,7 +1747,7 @@ Vector3 chestPosition(15.0f, 0.0f, 15.0f);  // Chest location in Scene 1 - open 
 bool chestOpened = false;  // Whether chest has been opened
 
 // Portal state
-Vector3 portalPosition(-23.0f, 0.0f, -23.0f);  // Portal location in Scene 1 - near the edge/border
+Vector3 portalPosition(0.0f, 0.0f, -45.0f);  // Portal location in Scene 1 - at the far wall (same as Scene 2)
 float portalTime = 0.0f;  // For portal animation
 float portalCooldown = 0.0f; // Cooldown to prevent instant re-teleport
 bool portalOpened = false;  // Whether portal has been opened by player click
@@ -1826,6 +1826,166 @@ Scene1_CaveEntrance* scene1Instance = nullptr;
 class Scene2_DeepCavern;
 Scene2_DeepCavern* scene2Instance = nullptr;
 
+// Shared portal drawing function for both scenes - Minecraft Nether Portal style
+void drawPortalComponent(Vector3 position, bool isActive, GLuint frameTexture) {
+    glPushMatrix();
+    glTranslatef(position.x, 0.0f, position.z);
+    
+    float portalWidth = 2.0f;
+    float portalHeight = 3.0f;
+    float portalDepth = 0.2f;
+    
+    // Enable blending for transparency
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    
+    // Enable texture for portal frame
+    glEnable(GL_TEXTURE_2D);
+    if (frameTexture) {
+        glBindTexture(GL_TEXTURE_2D, frameTexture);
+    }
+    
+    // Draw portal frame edges (always visible) - Minecraft style thick blocks with texture
+    GLfloat frameDiffuse[] = { 1.2f, 1.2f, 1.2f, 1.0f };  // Brighter to show texture better
+    GLfloat frameAmbient[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    GLfloat frameSpecular[] = { 0.5f, 0.5f, 0.5f, 1.0f };
+    GLfloat frameEmission[] = { 0.2f, 0.2f, 0.2f, 1.0f };  // Slight glow to make texture visible
+    glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, frameDiffuse);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, frameAmbient);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, frameSpecular);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, frameEmission);
+    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 30.0f);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    
+    float frameThickness = 0.4f;  // Much thicker blocks like Minecraft
+    float frameDepth = 0.4f;      // Depth of the frame blocks
+    
+    // Left edge - wider block
+    glPushMatrix();
+    glTranslatef(-portalWidth/2.0f - frameThickness/2.0f, portalHeight/2.0f, 0.0f);
+    glScalef(frameThickness, portalHeight + frameThickness*2, frameDepth);
+    glutSolidCube(1.0f);
+    glPopMatrix();
+    
+    // Right edge - wider block
+    glPushMatrix();
+    glTranslatef(portalWidth/2.0f + frameThickness/2.0f, portalHeight/2.0f, 0.0f);
+    glScalef(frameThickness, portalHeight + frameThickness*2, frameDepth);
+    glutSolidCube(1.0f);
+    glPopMatrix();
+    
+    // Top edge - wider block
+    glPushMatrix();
+    glTranslatef(0.0f, portalHeight + frameThickness/2.0f, 0.0f);
+    glScalef(portalWidth, frameThickness, frameDepth);
+    glutSolidCube(1.0f);
+    glPopMatrix();
+    
+    // Bottom edge - wider block
+    glPushMatrix();
+    glTranslatef(0.0f, frameThickness/2.0f, 0.0f);
+    glScalef(portalWidth, frameThickness, frameDepth);
+    glutSolidCube(1.0f);
+    glPopMatrix();
+    
+    // Disable texture for portal interior
+    glDisable(GL_TEXTURE_2D);
+    
+    // Reset frame emission before drawing portal interior
+    GLfloat noEmission[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, noEmission);
+    
+    // Draw portal interior - Minecraft Nether Portal style
+    if (isActive) {
+        // Multiple layers of purple with wavy distortion like nether portal
+        float glowPulse = 0.7f + 0.3f * sin(portalTime * 2.0f);
+        
+        // Draw multiple translucent layers for depth
+        for (int layer = 0; layer < 3; layer++) {
+            float layerOffset = layer * 0.05f - 0.05f;
+            float layerAlpha = 0.4f - layer * 0.1f;
+            
+            glPushMatrix();
+            glTranslatef(0.0f, portalHeight/2.0f, layerOffset);
+            
+            GLfloat portalDiffuse[] = { 0.5f * glowPulse, 0.2f * glowPulse, 0.7f * glowPulse, layerAlpha };
+            GLfloat portalAmbient[] = { 0.3f * glowPulse, 0.1f * glowPulse, 0.5f * glowPulse, layerAlpha };
+            GLfloat portalEmission[] = { 0.4f * glowPulse, 0.15f * glowPulse, 0.6f * glowPulse, 1.0f };
+            
+            glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, portalDiffuse);
+            glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, portalAmbient);
+            glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, portalEmission);
+            glColor4f(0.5f * glowPulse, 0.2f * glowPulse, 0.7f * glowPulse, layerAlpha);
+            
+            // Draw wavy portal surface (like nether portal distortion)
+            glBegin(GL_QUADS);
+            int segments = 8;
+            for (int i = 0; i < segments; i++) {
+                float y1 = -portalHeight/2.0f + (portalHeight / segments) * i;
+                float y2 = -portalHeight/2.0f + (portalHeight / segments) * (i + 1);
+                
+                // Add wave distortion based on height and time
+                float wave1 = sin(portalTime * 3.0f + i * 0.5f) * 0.05f;
+                float wave2 = sin(portalTime * 3.0f + (i + 1) * 0.5f) * 0.05f;
+                
+                glVertex3f(-portalWidth/2.0f + wave1, y1, 0.0f);
+                glVertex3f(portalWidth/2.0f + wave1, y1, 0.0f);
+                glVertex3f(portalWidth/2.0f + wave2, y2, 0.0f);
+                glVertex3f(-portalWidth/2.0f + wave2, y2, 0.0f);
+            }
+            glEnd();
+            glPopMatrix();
+        }
+        
+        // Minecraft-style falling purple particles
+        for (int i = 0; i < 40; i++) {
+            float particleTime = fmod(portalTime * 1.5f + i * 0.5f, 3.0f);
+            float xPos = -portalWidth/2.0f + (portalWidth * (i % 8) / 8.0f);
+            float yPos = portalHeight - (particleTime * portalHeight / 3.0f);
+            float zPos = (sin(particleTime * 2.0f + i) * 0.1f);
+            
+            if (yPos > 0.0f && yPos < portalHeight) {
+                glPushMatrix();
+                glTranslatef(xPos, yPos, zPos);
+                
+                float particleGlow = 0.8f + 0.2f * sin(portalTime * 5.0f + i);
+                GLfloat particleEmission[] = { 0.5f * particleGlow, 0.2f * particleGlow, 0.7f * particleGlow, 1.0f };
+                glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, particleEmission);
+                glColor4f(0.6f * particleGlow, 0.25f * particleGlow, 0.8f * particleGlow, 0.9f);
+                glutSolidSphere(0.04f, 6, 6);
+                glPopMatrix();
+            }
+        }
+        
+        // Swirling particles around the edges
+        for (int i = 0; i < 30; i++) {
+            float angle = (portalTime * 3.0f + i * 12.0f) * 3.14159f / 180.0f;
+            float radiusX = portalWidth/2.0f * 0.8f;
+            float height = (portalHeight * 0.9f) * (sin(portalTime + i * 0.2f) * 0.5f + 0.5f);
+            
+            glPushMatrix();
+            glTranslatef(
+                radiusX * cos(angle),
+                height + 0.2f,
+                sin(angle) * 0.15f
+            );
+            
+            float particleGlow = 0.7f + 0.3f * sin(portalTime * 6.0f + i);
+            GLfloat swirlEmission[] = { 0.6f * particleGlow, 0.25f * particleGlow, 0.8f * particleGlow, 1.0f };
+            glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, swirlEmission);
+            glColor4f(0.7f * particleGlow, 0.3f * particleGlow, 0.9f * particleGlow, 0.8f);
+            glutSolidSphere(0.05f, 6, 6);
+            glPopMatrix();
+        }
+        
+        // Reset emission
+        glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, noEmission);
+    }
+    
+    glDisable(GL_BLEND);
+    glPopMatrix();
+}
+
 class Scene1_CaveEntrance : public Scene {
 private:
     // Scene-specific model pointers for easy access
@@ -1846,6 +2006,7 @@ private:
     GLuint flockTexture;  // Flock/bird texture
     GLuint skyTexture;    // Sky texture
     GLuint steveFaceTexture;  // Steve face texture for player head
+    GLuint portalFrameTexture;  // Portal frame texture
     
     // Wolf position and AI
     Vector3 wolfPosition;
@@ -1927,7 +2088,7 @@ public:
                             wolfModel(nullptr), wolfTexture(0), cowModel(nullptr), cowTexture(0),
                             creeperModel(nullptr), creeperTexture(0), flockModel(nullptr),
                             grassTexture(0), stoneTexture(0), flockTexture(0), wallTexture(0),
-                            skyTexture(0), steveFaceTexture(0),
+                            skyTexture(0), steveFaceTexture(0), portalFrameTexture(0),
                             wolfPosition(-10.0f, 0.0f, 10.0f), wolfRotation(0.0f),
                             wolfWanderTime(0.0f), wolfTargetPosition(-10.0f, 0.0f, 10.0f), wolfMoveSpeed(0.03f),
                             cowPosition(-15.0f, 0.0f, -15.0f), cowRotation(0.0f),
@@ -2013,6 +2174,12 @@ public:
         steveFaceTexture = loadTexture("models/steveFace.jpg");
         if (steveFaceTexture) {
             std::cout << "Steve face texture loaded successfully!" << std::endl;
+        }
+        
+        // Load portal frame texture
+        portalFrameTexture = loadTexture("models/images.jpg");
+        if (portalFrameTexture) {
+            std::cout << "Portal frame texture loaded successfully!" << std::endl;
         }
         
         // Copy steve face texture to global variable for Player class access
@@ -2239,7 +2406,7 @@ public:
             glPushMatrix();
             
             // Position cow on the ground - rotate to stand upright
-            float cowScale = 0.04f;
+            float cowScale = 0.03f;  // Slightly bigger than the wolf/dog
             float cowYOffset = 0.4f;  // Raise slightly above ground
             glTranslatef(cowPosition.x, cowYOffset, cowPosition.z);
             glRotatef(cowRotation, 0.0f, 1.0f, 0.0f);
@@ -3104,116 +3271,10 @@ private:
         glPopMatrix();
     }
     
+    // Scene 1 portal wrapper
     void drawPortal() {
-        glPushMatrix();
-        glTranslatef(portalPosition.x, 0.0f, portalPosition.z);
-        
-        float portalWidth = 2.0f;
-        float portalHeight = 3.0f;
-        float portalDepth = 0.2f;
-        
-        // Enable blending for transparency
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glDisable(GL_TEXTURE_2D);
-        
-        // Draw portal frame edges (always visible)
-        GLfloat frameDiffuse[] = { 0.3f, 0.15f, 0.4f, 1.0f };  // Dark purple
-        GLfloat frameAmbient[] = { 0.15f, 0.1f, 0.2f, 1.0f };
-        GLfloat frameSpecular[] = { 0.5f, 0.3f, 0.6f, 1.0f };
-        glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, frameDiffuse);
-        glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, frameAmbient);
-        glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, frameSpecular);
-        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 50.0f);
-        glColor4f(0.3f, 0.15f, 0.4f, 1.0f);
-        
-        float frameThickness = 0.15f;
-        
-        // Left edge
-        glPushMatrix();
-        glTranslatef(-portalWidth/2.0f, portalHeight/2.0f, 0.0f);
-        glScalef(frameThickness, portalHeight, frameThickness);
-        glutSolidCube(1.0f);
-        glPopMatrix();
-        
-        // Right edge
-        glPushMatrix();
-        glTranslatef(portalWidth/2.0f, portalHeight/2.0f, 0.0f);
-        glScalef(frameThickness, portalHeight, frameThickness);
-        glutSolidCube(1.0f);
-        glPopMatrix();
-        
-        // Top edge
-        glPushMatrix();
-        glTranslatef(0.0f, portalHeight, 0.0f);
-        glScalef(portalWidth + frameThickness * 2, frameThickness, frameThickness);
-        glutSolidCube(1.0f);
-        glPopMatrix();
-        
-        // Bottom edge
-        glPushMatrix();
-        glTranslatef(0.0f, 0.0f, 0.0f);
-        glScalef(portalWidth + frameThickness * 2, frameThickness, frameThickness);
-        glutSolidCube(1.0f);
-        glPopMatrix();
-        
-        // Draw portal interior
-        if (portalOpened) {
-            // Portal is opened - dark purple glowing effect
-            float glowPulse = 0.5f + 0.3f * sin(portalTime * 3.0f);  // Pulsing glow
-            
-            GLfloat portalDiffuse[] = { 0.3f * glowPulse, 0.1f * glowPulse, 0.4f * glowPulse, 0.9f };
-            GLfloat portalAmbient[] = { 0.2f * glowPulse, 0.05f * glowPulse, 0.25f * glowPulse, 0.9f };
-            GLfloat portalEmission[] = { 0.25f * glowPulse, 0.1f * glowPulse, 0.35f * glowPulse, 1.0f };
-            
-            glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, portalDiffuse);
-            glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, portalAmbient);
-            glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, portalEmission);
-            glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 100.0f);
-            glColor4f(0.3f * glowPulse, 0.1f * glowPulse, 0.4f * glowPulse, 0.9f);
-            
-            // Draw semi-transparent purple portal surface
-            glPushMatrix();
-            glTranslatef(0.0f, portalHeight/2.0f, 0.0f);
-            glBegin(GL_QUADS);
-            glVertex3f(-portalWidth/2.0f, -portalHeight/2.0f, 0.0f);
-            glVertex3f(portalWidth/2.0f, -portalHeight/2.0f, 0.0f);
-            glVertex3f(portalWidth/2.0f, portalHeight/2.0f, 0.0f);
-            glVertex3f(-portalWidth/2.0f, portalHeight/2.0f, 0.0f);
-            glEnd();
-            glPopMatrix();
-            
-            // Add swirling particle effect
-            for (int i = 0; i < 20; i++) {
-                float angle = (portalTime * 2.0f + i * 18.0f) * 3.14159f / 180.0f;
-                float radius = 0.3f + 0.5f * (i / 20.0f);
-                float height = (portalHeight * 0.9f) * (i / 20.0f);
-                
-                glPushMatrix();
-                glTranslatef(
-                    radius * cos(angle),
-                    height + 0.1f,
-                    radius * sin(angle) * 0.1f
-                );
-                
-                float particleGlow = 0.6f + 0.4f * sin(portalTime * 4.0f + i);
-                glColor4f(0.4f * particleGlow, 0.15f * particleGlow, 0.5f * particleGlow, 0.9f);
-                glutSolidSphere(0.05f, 6, 6);
-                glPopMatrix();
-            }
-            
-            // Reset emission
-            GLfloat noEmission[] = { 0.0f, 0.0f, 0.0f, 1.0f };
-            glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, noEmission);
-        } else {
-            // Portal is closed - fully transparent center, only edges visible
-            // No need to draw anything for the center when portal is not opened
-        }
-        
-        glDisable(GL_BLEND);
-        glPopMatrix();
+        drawPortalComponent(portalPosition, portalOpened, portalFrameTexture);
     }
-    
 
     
     void drawSceneLabel() {
@@ -3480,6 +3541,7 @@ private:
     GLuint lavaTexture;   // Lava texture for lava pools
     GLuint amethystTexture;  // Amethyst texture for crystals
     GLuint batTexture;    // Bat texture for flying bats
+    GLuint portalFrameTexture;  // Portal frame texture
     
     // Room dimensions - same as Scene 1 (100x100)
     float roomWidth = 100.0f;
@@ -3544,7 +3606,7 @@ public:
     };
     std::vector<Bat> bats;
 
-    Scene2_DeepCavern() : Scene("Dark Stone Dungeon"), stoneTexture(0), lavaTexture(0), amethystTexture(0), batTexture(0), lavaDamageTimer(0.0f) {
+    Scene2_DeepCavern() : Scene("Dark Stone Dungeon"), stoneTexture(0), lavaTexture(0), amethystTexture(0), batTexture(0), portalFrameTexture(0), lavaDamageTimer(0.0f) {
         // Extremely dark ambient for dungeon atmosphere (old lighting)
         ambientLight[0] = 0.02f;
         ambientLight[1] = 0.02f;
@@ -3644,6 +3706,12 @@ public:
         batTexture = loadTexture("models/bat.jpg");
         if (batTexture) {
             std::cout << "Bat texture loaded for flying bats!" << std::endl;
+        }
+        
+        // Load portal frame texture
+        portalFrameTexture = loadTexture("models/images.jpg");
+        if (portalFrameTexture) {
+            std::cout << "Portal frame texture loaded for Scene 2!" << std::endl;
         }
         
         // Load stones and trap models
@@ -4057,107 +4125,9 @@ public:
         }
     }
     
+    // Scene 2 portal wrapper (portal is always active in Scene 2)
     void drawPortalScene2() {
-        glPushMatrix();
-        glTranslatef(portalPositionScene2.x, 0.0f, portalPositionScene2.z);
-        
-        float portalWidth = 2.0f;
-        float portalHeight = 3.0f;
-        
-        // Enable blending for transparency
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glDisable(GL_TEXTURE_2D);
-        
-        // Draw portal frame edges (always visible)
-        GLfloat frameDiffuse[] = { 0.3f, 0.15f, 0.4f, 1.0f };  // Dark purple
-        GLfloat frameAmbient[] = { 0.15f, 0.1f, 0.2f, 1.0f };
-        GLfloat frameSpecular[] = { 0.5f, 0.3f, 0.6f, 1.0f };
-        glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, frameDiffuse);
-        glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, frameAmbient);
-        glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, frameSpecular);
-        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 50.0f);
-        glColor4f(0.3f, 0.15f, 0.4f, 1.0f);
-        
-        float frameThickness = 0.15f;
-        
-        // Left edge
-        glPushMatrix();
-        glTranslatef(-portalWidth/2.0f, portalHeight/2.0f, 0.0f);
-        glScalef(frameThickness, portalHeight, frameThickness);
-        glutSolidCube(1.0f);
-        glPopMatrix();
-        
-        // Right edge
-        glPushMatrix();
-        glTranslatef(portalWidth/2.0f, portalHeight/2.0f, 0.0f);
-        glScalef(frameThickness, portalHeight, frameThickness);
-        glutSolidCube(1.0f);
-        glPopMatrix();
-        
-        // Top edge
-        glPushMatrix();
-        glTranslatef(0.0f, portalHeight, 0.0f);
-        glScalef(portalWidth + frameThickness * 2, frameThickness, frameThickness);
-        glutSolidCube(1.0f);
-        glPopMatrix();
-        
-        // Bottom edge
-        glPushMatrix();
-        glTranslatef(0.0f, 0.0f, 0.0f);
-        glScalef(portalWidth + frameThickness * 2, frameThickness, frameThickness);
-        glutSolidCube(1.0f);
-        glPopMatrix();
-        
-        // Portal is always active in Scene 2 (return portal)
-        float glowPulse = 0.5f + 0.3f * sin(portalTime * 3.0f);
-        
-        GLfloat portalDiffuse[] = { 0.6f * glowPulse, 0.2f * glowPulse, 0.8f * glowPulse, 0.7f };
-        GLfloat portalAmbient[] = { 0.4f * glowPulse, 0.1f * glowPulse, 0.5f * glowPulse, 0.7f };
-        GLfloat portalEmission[] = { 0.4f * glowPulse, 0.15f * glowPulse, 0.6f * glowPulse, 1.0f };
-        
-        glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, portalDiffuse);
-        glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, portalAmbient);
-        glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, portalEmission);
-        glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 100.0f);
-        glColor4f(0.6f * glowPulse, 0.2f * glowPulse, 0.8f * glowPulse, 0.7f);
-        
-        // Draw semi-transparent purple portal surface
-        glPushMatrix();
-        glTranslatef(0.0f, portalHeight/2.0f, 0.0f);
-        glBegin(GL_QUADS);
-        glVertex3f(-portalWidth/2.0f, -portalHeight/2.0f, 0.0f);
-        glVertex3f(portalWidth/2.0f, -portalHeight/2.0f, 0.0f);
-        glVertex3f(portalWidth/2.0f, portalHeight/2.0f, 0.0f);
-        glVertex3f(-portalWidth/2.0f, portalHeight/2.0f, 0.0f);
-        glEnd();
-        glPopMatrix();
-        
-        // Add swirling particle effect
-        for (int i = 0; i < 20; i++) {
-            float angle = (portalTime * 2.0f + i * 18.0f) * 3.14159f / 180.0f;
-            float radius = 0.3f + 0.5f * (i / 20.0f);
-            float height = (portalHeight * 0.9f) * (i / 20.0f);
-            
-            glPushMatrix();
-            glTranslatef(
-                radius * cos(angle),
-                height + 0.1f,
-                radius * sin(angle) * 0.1f
-            );
-            
-            float particleGlow = 0.6f + 0.4f * sin(portalTime * 4.0f + i);
-            glColor4f(0.7f * particleGlow, 0.3f * particleGlow, 1.0f * particleGlow, 0.8f);
-            glutSolidSphere(0.05f, 6, 6);
-            glPopMatrix();
-        }
-        
-        // Reset emission
-        GLfloat noEmission[] = { 0.0f, 0.0f, 0.0f, 1.0f };
-        glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, noEmission);
-        
-        glDisable(GL_BLEND);
-        glPopMatrix();
+        drawPortalComponent(portalPositionScene2, true, portalFrameTexture);
     }
     
     void update(float deltaTime) override {
@@ -5472,20 +5442,22 @@ void timer(int value) {
                 flameSpawnTimer = 0.0f;
             }
             
-            // Apply lava damage (0.5 life per second)
-            scene2Instance->lavaDamageTimer += deltaTime;
-            if (scene2Instance->lavaDamageTimer >= 1.0f) {
-                lives -= 0.5f;
-                scene2Instance->lavaDamageTimer = 0.0f;
-                trapDamageCooldown = 1.5f;  // Trigger damage flash
-                playDamageSound();  // Play damage sound
-                std::cout << "BURNING! Lava damage! Lives remaining: " << lives << std::endl;
-                if (lives <= 0) {
-                    std::cout << "GAME OVER! You burned in lava!" << std::endl;
-                    lives = 0;
-                    if (!gameOverSoundPlayed) {
-                        playGameOverSound();  // Play game over sound
-                        gameOverSoundPlayed = true;
+            // Apply lava damage (0.5 life per second) - only if player is on the ground
+            if (player.isOnGround) {
+                scene2Instance->lavaDamageTimer += deltaTime;
+                if (scene2Instance->lavaDamageTimer >= 1.0f) {
+                    lives -= 0.5f;
+                    scene2Instance->lavaDamageTimer = 0.0f;
+                    trapDamageCooldown = 1.5f;  // Trigger damage flash
+                    playDamageSound();  // Play damage sound
+                    std::cout << "BURNING! Lava damage! Lives remaining: " << lives << std::endl;
+                    if (lives <= 0) {
+                        std::cout << "GAME OVER! You burned in lava!" << std::endl;
+                        lives = 0;
+                        if (!gameOverSoundPlayed) {
+                            playGameOverSound();  // Play game over sound
+                            gameOverSoundPlayed = true;
+                        }
                     }
                 }
             }
@@ -5496,8 +5468,8 @@ void timer(int value) {
         }
     }
     
-    // Check for trap damage in Scene 2 (traps don't block, but damage on contact)
-    if (currentScene == 2 && trapDamageCooldown <= 0) {
+    // Check for trap damage in Scene 2 (traps don't block, but damage on contact) - only if on ground
+    if (currentScene == 2 && trapDamageCooldown <= 0 && player.isOnGround) {
         if (scene2Instance) {
             if (scene2Instance->checkTrapCollision(player.position.x, player.position.z, 0.3f)) {
                 lives -= 1.0f;
